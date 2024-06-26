@@ -1,37 +1,110 @@
-Got it. Here's the comprehensive build and deployment document, including an automated rollback mechanism in Jenkins managed by CloudBees CD/RO, if deployment fails.
+## Build and Deployment Document
 
----
+### Introduction
 
-# Build and Deployment Document
+This document outlines the integration and deployment sequences of the application using CloudBees CD/RO for CI/CD management. The entire pipeline, including image creation, scanning, promotion, deployment, and testing, is automated via Jenkins and managed by CloudBees CD/RO.
 
-## Overview
-This document outlines the process of building, deploying, and managing an application using Kubernetes, Helm, Jenkins for CI/CD, and CloudBees CD/RO for orchestration. It covers the setup and execution of a CI/CD pipeline that automates the deployment process across dev, uat, and prod environments, including automated rollback on deployment failures.
+### Table of Contents
 
-## Prerequisites
-1. **Kubernetes Cluster**: Kubernetes clusters for dev, uat, and prod environments.
-2. **Helm**: Helm installed and configured to manage Kubernetes deployments.
-3. **CloudBees CD/RO**: CloudBees CD/RO set up for orchestrating the CI/CD pipeline.
-4. **Jenkins**: Jenkins configured and integrated with CloudBees CD/RO.
-5. **Source Code Repository**: Git repository for the application's source code.
-6. **Docker Registry**: A registry to store Docker images (e.g., Docker Hub, AWS ECR).
+1. Build Environment Setup
+2. Deployment Environment Setup
+3. Detailed Build Process
+4. Detailed Deployment Process
+5. Verification and Validation
+6. Rollback and Recovery Plan
+7. Security and Compliance
+8. Monitoring and Logging
+9. Troubleshooting Guide
+10. Appendix
 
-## Step-by-Step Guide
+### 1. Build Environment Setup
 
-### 1. Source Code Management
-- **Repository**: Ensure the application code is in a Git repository.
-- **Branching Strategy**: Use a branching strategy (e.g., feature branches, `develop`, `uat`, and `master`).
+- **Source Control:** Configure access to the Git repository at `https://github.com/your-repo/app.git`.
+- **Jenkins Setup:** Ensure Jenkins is configured with required plugins:
+  - Docker Pipeline
+  - SonarQube Scanner
+  - Aqua Security
+  - Nexus Artifact Uploader
 
-### 2. Jenkins Pipeline Configuration
+### 2. Deployment Environment Setup
 
-#### Jenkinsfile for CI
-Create a `Jenkinsfile` in the root of your repository to define the build and test pipeline.
+- **Kubernetes Cluster:** Ensure the Kubernetes cluster is set up and accessible.
+- **Helm:** Install and configure Helm for managing Kubernetes applications.
+- **Nexus Repositories:** Set up Nexus repositories for dev, uat, and prod environments.
+- **Automated Deployment with Jenkins:** Configure Jenkins jobs to automate the deployment process using Helm charts. The jobs will pull the latest Helm charts and application code, and deploy to the Kubernetes cluster.
+
+#### Jenkins Job for Deployment
+
+1. **Pull Helm Charts and Application Code:**
+   - Use Jenkins to pull the latest Helm charts and application code from the Git repository.
+
+2. **Deploy to Kubernetes Cluster:**
+   - Deploy the application to the Kubernetes cluster using Helm.
+
+Example Jenkinsfile for Automated Deployment:
 
 ```groovy
 pipeline {
     agent any
     environment {
-        DOCKER_REGISTRY = 'your-repo'
+        DOCKER_REGISTRY = 'your-registry'
         IMAGE_NAME = 'app'
+        KUBECONFIG = credentials('kubeconfig')
+    }
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag to deploy')
+        string(name: 'ENV', defaultValue: 'dev', description: 'Environment to deploy to')
+    }
+    stages {
+        stage('Checkout Helm Charts and Application Code') {
+            steps {
+                git 'https://github.com/your-repo/helm-charts.git'
+                git 'https://github.com/your-repo/app.git'
+            }
+        }
+        stage('Deploy to Kubernetes Cluster') {
+            steps {
+                script {
+                    def helmReleaseName = "app-${params.ENV}"
+                    def namespace = params.ENV
+                    sh "helm upgrade --install ${helmReleaseName} ./helm-charts --set image.repository=${DOCKER_REGISTRY}/${IMAGE_NAME} --set image.tag=${params.IMAGE_TAG} --namespace ${namespace} --kubeconfig ${KUBECONFIG}"
+                }
+            }
+        }
+    }
+}
+```
+
+### 3. Detailed Build Process
+
+#### Jenkins Pipeline Configuration
+
+1. **Checkout Code:**
+   - Pull the latest code from the Git repository.
+
+2. **Build Docker Image:**
+   - Build the Docker image using the latest code.
+
+3. **Run SonarQube Analysis:**
+   - Analyze the code quality using SonarQube.
+
+4. **Run Aqua Security Scan:**
+   - Scan the Docker image for vulnerabilities using Aqua.
+
+5. **Push to Nexus Dev:**
+   - Push the Docker image to the Nexus dev repository.
+
+#### Jenkinsfile for CI
+
+```groovy
+pipeline {
+    agent any
+    environment {
+        DOCKER_REGISTRY = 'your-registry'
+        IMAGE_NAME = 'app'
+        SONARQUBE_SERVER = 'SonarQube'
+        AQUA_SERVER = 'Aqua'
+        NEXUS_DEV = 'nexus-dev-repo'
     }
     stages {
         stage('Checkout') {
@@ -39,7 +112,7 @@ pipeline {
                 git 'https://github.com/your-repo/app.git'
             }
         }
-        stage('Build and Push Docker Image') {
+        stage('Build Docker Image') {
             steps {
                 script {
                     def commitId = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
@@ -48,9 +121,21 @@ pipeline {
                 }
             }
         }
-        stage('Run Unit Tests') {
+        stage('SonarQube Analysis') {
             steps {
-                sh './run_unit_tests.sh'
+                withSonarQubeEnv("${SONARQUBE_SERVER}") {
+                    sh 'mvn sonar:sonar'
+                }
+            }
+        }
+        stage('Aqua Security Scan') {
+            steps {
+                sh "aqua scan --local --host ${AQUA_SERVER} --image ${DOCKER_REGISTRY}/${IMAGE_NAME}:${env.IMAGE_TAG}"
+            }
+        }
+        stage('Push to Nexus Dev') {
+            steps {
+                sh "curl -u 'admin:admin123' --upload-file ${DOCKER_REGISTRY}/${IMAGE_NAME}:${env.IMAGE_TAG} http://${NEXUS_DEV}/repository/docker-hosted/"
             }
         }
     }
@@ -64,14 +149,56 @@ pipeline {
 }
 ```
 
+### 4. Detailed Deployment Process
+
+#### CloudBees CD/RO Pipeline Configuration
+
+1. **Build Image and Run Scan:**
+   - Trigger the Jenkins job to build the Docker image and run SonarQube and Aqua scans.
+
+2. **Deploy to Dev:**
+   - Deploy the Docker image to the dev environment using Helm.
+
+3. **Run Smoke Test on Dev:**
+   - Run smoke tests on the dev deployment.
+
+4. **Promote Image to Nexus UAT:**
+   - Promote the Docker image from Nexus dev repository to Nexus uat repository.
+
+5. **Approval for UAT Deployment:**
+   - Obtain manual approval for deployment to the uat environment.
+
+6. **Deploy to UAT:**
+   - Deploy the Docker image to the uat environment using Helm.
+
+7. **Run Smoke Test on UAT:**
+   - Run smoke tests on the uat deployment.
+
+8. **Notify UAT Deployment:**
+   - Notify stakeholders of the UAT deployment.
+
+9. **Promote Image to Nexus Prod:**
+   - Promote the Docker image from Nexus uat repository to Nexus prod repository.
+
+10. **Approval for Prod Deployment:**
+    - Obtain manual approval for deployment to the prod environment.
+
+11. **Deploy to Prod:**
+    - Deploy the Docker image to the prod environment using Helm.
+
+12. **Run Smoke Test on Prod:**
+    - Run smoke tests on the prod deployment.
+
+13. **Notify Prod Deployment:**
+    - Notify stakeholders of the Prod deployment.
+
 #### Jenkinsfile for CD
-Create a `Jenkinsfile` for deployment and promotion jobs. These jobs will be triggered by CloudBees CD/RO.
 
 ```groovy
 pipeline {
     agent any
     environment {
-        DOCKER_REGISTRY = 'your-repo'
+        DOCKER_REGISTRY = 'your-registry'
         IMAGE_NAME = 'app'
         KUBECONFIG = credentials('kubeconfig')
     }
@@ -80,114 +207,187 @@ pipeline {
         string(name: 'ENV', defaultValue: 'dev', description: 'Environment to deploy to')
     }
     stages {
-        stage('Deploy to Environment') {
+        stage('Deploy to Dev') {
+            steps {
+                sh "helm upgrade --install app-dev ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace dev"
+            }
+        }
+        stage('Smoke Test') {
+            steps {
+                sh './run_smoke_tests.sh'
+            }
+        }
+        stage('Promote Image to UAT') {
+            steps {
+                sh "curl -u 'admin:admin123' -X POST -H 'Content-Type: application/json' -d '{\"source\":\"nexus-dev-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\", \"target\":\"nexus-uat-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\"}' http://nexus-url/service/rest/v1/move"
+            }
+        }
+        stage('Approval for UAT') {
+            steps {
+                input(message: 'Deploy to UAT?', ok: 'Proceed')
+            }
+        }
+        stage('Deploy to UAT') {
+            steps {
+                sh "helm upgrade --install app-uat ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace uat"
+            }
+        }
+        stage('Smoke Test on UAT') {
+            steps {
+                sh './run_smoke_tests.sh'
+            }
+        }
+        stage('Notify UAT Deployment') {
             steps {
                 script {
-                    sh "helm upgrade --install app-${params.ENV} ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace ${params.ENV}"
+                    slackSend(channel: 'uat-notifications', message: "Deployment to UAT completed", tokenCredentialId: 'slack-webhook')
                 }
             }
         }
-        stage('Run Tests') {
+        stage('Promote Image to Prod') {
+            steps {
+                sh "curl -u 'admin:admin123' -X POST -H 'Content-Type: application/json' -d '{\"source\":\"nexus-uat-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\", \"target\":\"nexus-prod-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\"}' http://nexus-url/service/rest/v1/move"
+            }
+        }
+        stage('Approval for Prod') {
+            steps {
+                input(message: 'Deploy to Prod?', ok: 'Proceed')
+            }
+        }
+        stage('Deploy to Prod') {
+            steps {
+                sh "helm upgrade --install app-prod ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace prod"
+            }
+        }
+        stage('Smoke Test on Prod') {
+            steps {
+                sh './run_smoke_tests.sh'
+            }
+        }
+        stage('Notify Prod Deployment') {
             steps {
                 script {
-                    if (params.ENV == 'dev') {
-                        sh './run_integration_tests.sh'
-                    } else if (params.ENV == 'uat') {
-                        sh './run_acceptance_tests.sh'
-                    } else if (params.ENV == 'prod') {
-                        sh './run_smoke_tests.sh'
-                    }
-                }
-            }
-        }
-    }
-    post {
-        failure {
-            script {
-                if (params.ENV == 'prod' || params.ENV == 'uat') {
-                    def previousRevision = sh(script: "helm history app-${params.ENV} --max 2 | awk 'NR==3 {print \$1}'", returnStdout: true).trim()
-                    if (previousRevision) {
-                        sh "helm rollback app-${params.ENV} ${previousRevision}"
-                    }
-                }
-            }
-        }
-    }
-}
-```
+                    slackSend(channel: 'prod-notifications', message: "Deployment to Prod completed", token
 
-### 3. CloudBees CD/RO Pipeline Setup
+### 4. Detailed Deployment Process
 
-#### Pipeline Structure
-- **Stages**: Define stages for dev, uat, and prod.
-- **Tasks**: Define tasks within each stage for triggering Jenkins jobs, approvals, and notifications.
+#### CloudBees CD/RO Pipeline Configuration
 
-#### Pipeline Configuration in CloudBees CD/RO
-1. **Create a New Pipeline**:
-   - Navigate to the Pipelines section in CloudBees CD/RO.
-   - Create a new pipeline and name it appropriately (e.g., `AppDeploymentPipeline`).
+1. **Build Image and Run Scan:**
+   - Trigger the Jenkins job to build the Docker image and run SonarQube and Aqua scans.
 
-2. **Configure Stages and Tasks**:
-   - **Development Stage**:
-     - **Trigger Jenkins Job Task**: Trigger the Jenkins job defined in the `Jenkinsfile` to build, push the Docker image, and run unit tests.
-     - **Deploy to Dev Task**: Trigger the Jenkins job to deploy to the dev environment using the built Docker image.
-   - **UAT Stage**:
-     - **Promote Image Task**: Promote the Docker image from dev to uat.
-     - **Deploy to UAT Task**: Trigger the Jenkins job to deploy to the uat environment.
-     - **Integration Test Task**: Run integration tests.
-     - **Approval Gate**: Optional manual approval before proceeding to prod.
-   - **Production Stage**:
-     - **Promote Image Task**: Promote the Docker image from uat to prod.
-     - **Deploy to Production Task**: Trigger the Jenkins job to deploy to the prod environment.
-     - **Smoke Test Task**: Run smoke tests.
-     - **Notification Task**: Notify stakeholders of the successful deployment.
+2. **Deploy to Dev:**
+   - Deploy the Docker image to the dev environment using Helm.
 
-### 4. Deployment to UAT and Production
+3. **Run Smoke Test on Dev:**
+   - Run smoke tests on the dev deployment.
 
-#### Jenkins Job for UAT and Production
-Create Jenkins jobs for deploying to uat and prod environments. These jobs use the Helm chart and Docker image tag created in the dev stage.
+4. **Promote Image to Nexus UAT:**
+   - Promote the Docker image from Nexus dev repository to Nexus uat repository.
 
-##### Example Deployment Job Script
+5. **Approval for UAT Deployment:**
+   - Obtain manual approval for deployment to the uat environment.
+
+6. **Deploy to UAT:**
+   - Deploy the Docker image to the uat environment using Helm.
+
+7. **Run Smoke Test on UAT:**
+   - Run smoke tests on the uat deployment.
+
+8. **Notify UAT Deployment:**
+   - Notify stakeholders of the UAT deployment.
+
+9. **Promote Image to Nexus Prod:**
+   - Promote the Docker image from Nexus uat repository to Nexus prod repository.
+
+10. **Approval for Prod Deployment:**
+    - Obtain manual approval for deployment to the prod environment.
+
+11. **Deploy to Prod:**
+    - Deploy the Docker image to the prod environment using Helm.
+
+12. **Run Smoke Test on Prod:**
+    - Run smoke tests on the prod deployment.
+
+13. **Notify Prod Deployment:**
+    - Notify stakeholders of the Prod deployment.
+
+#### Jenkinsfile for CD
+
 ```groovy
 pipeline {
     agent any
     environment {
-        DOCKER_REGISTRY = 'your-repo'
+        DOCKER_REGISTRY = 'your-registry'
         IMAGE_NAME = 'app'
         KUBECONFIG = credentials('kubeconfig')
     }
     parameters {
         string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag to deploy')
-        string(name: 'ENV', defaultValue: 'uat', description: 'Environment to deploy to')
+        string(name: 'ENV', defaultValue: 'dev', description: 'Environment to deploy to')
     }
     stages {
-        stage('Deploy to Environment') {
+        stage('Deploy to Dev') {
+            steps {
+                sh "helm upgrade --install app-dev ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace dev --kubeconfig ${KUBECONFIG}"
+            }
+        }
+        stage('Smoke Test on Dev') {
+            steps {
+                sh './run_smoke_tests.sh'
+            }
+        }
+        stage('Promote Image to UAT') {
+            steps {
+                sh "curl -u 'admin:admin123' -X POST -H 'Content-Type: application/json' -d '{\"source\":\"nexus-dev-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\", \"target\":\"nexus-uat-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\"}' http://nexus-url/service/rest/v1/move"
+            }
+        }
+        stage('Approval for UAT') {
+            steps {
+                input(message: 'Deploy to UAT?', ok: 'Proceed')
+            }
+        }
+        stage('Deploy to UAT') {
+            steps {
+                sh "helm upgrade --install app-uat ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace uat --kubeconfig ${KUBECONFIG}"
+            }
+        }
+        stage('Smoke Test on UAT') {
+            steps {
+                sh './run_smoke_tests.sh'
+            }
+        }
+        stage('Notify UAT Deployment') {
             steps {
                 script {
-                    sh "helm upgrade --install app-${params.ENV} ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace ${params.ENV}"
+                    slackSend(channel: 'uat-notifications', message: "Deployment to UAT completed", tokenCredentialId: 'slack-webhook')
                 }
             }
         }
-        stage('Run Tests') {
+        stage('Promote Image to Prod') {
             steps {
-                script {
-                    if (params.ENV == 'uat') {
-                        sh './run_acceptance_tests.sh'
-                    } else if (params.ENV == 'prod') {
-                        sh './run_smoke_tests.sh'
-                    }
-                }
+                sh "curl -u 'admin:admin123' -X POST -H 'Content-Type: application/json' -d '{\"source\":\"nexus-uat-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\", \"target\":\"nexus-prod-repo/docker-hosted/${IMAGE_NAME}:${params.IMAGE_TAG}\"}' http://nexus-url/service/rest/v1/move"
             }
         }
-    }
-    post {
-        failure {
-            script {
-                if (params.ENV == 'prod' || params.ENV == 'uat') {
-                    def previousRevision = sh(script: "helm history app-${params.ENV} --max 2 | awk 'NR==3 {print \$1}'", returnStdout: true).trim()
-                    if (previousRevision) {
-                        sh "helm rollback app-${params.ENV} ${previousRevision}"
-                    }
+        stage('Approval for Prod') {
+            steps {
+                input(message: 'Deploy to Prod?', ok: 'Proceed')
+            }
+        }
+        stage('Deploy to Prod') {
+            steps {
+                sh "helm upgrade --install app-prod ./helm-chart --set image.tag=${params.IMAGE_TAG} --namespace prod --kubeconfig ${KUBECONFIG}"
+            }
+        }
+        stage('Smoke Test on Prod') {
+            steps {
+                sh './run_smoke_tests.sh'
+            }
+        }
+        stage('Notify Prod Deployment') {
+            steps {
+                script {
+                    slackSend(channel: 'prod-notifications', message: "Deployment to Prod completed", tokenCredentialId: 'slack-webhook')
                 }
             }
         }
@@ -195,15 +395,33 @@ pipeline {
 }
 ```
 
-### 5. Rollback Mechanism
-- Rollbacks are automated in Jenkins and managed by CloudBees CD/RO using Helm rollback commands in the Jenkinsfile post-failure step.
+### 5. Verification and Validation
 
-### 6. Monitoring and Logging
-- Use tools like Prometheus and Grafana for monitoring, and ELK stack for logging.
+- **Integration Tests:** Run in the dev environment.
+- **Acceptance Tests:** Run in the uat environment.
+- **Smoke Tests:** Run in dev, uat, and prod environments to ensure deployment success.
 
-### 7. Conclusion
-Following this document will help automate and streamline the build and deployment process, ensuring consistent and reliable releases from dev to uat to prod using Kubernetes, Helm, Jenkins, and CloudBees CD/RO. The document also includes an automated rollback mechanism to handle deployment failures.
+### 6. Rollback and Recovery Plan
 
----
+- **Automated Rollback:** If a deployment fails, the pipeline automatically triggers a rollback to the previous stable version using Helm.
 
-Feel free to adjust the specifics according to your actual setup and requirements.
+### 7. Security and Compliance
+
+- **SonarQube Analysis:** Ensure code quality and compliance.
+- **Aqua Security Scan:** Identify and mitigate security vulnerabilities in Docker images.
+
+### 8. Monitoring and Logging
+
+- **Logging:** Use centralized logging solutions like ELK Stack for monitoring application logs.
+- **Monitoring:** Implement monitoring tools such as Prometheus and Grafana to monitor application health and performance.
+
+### 9. Troubleshooting Guide
+
+- **Build Failures:** Check Jenkins logs and build output.
+- **Deployment Failures:** Review Kubernetes and Helm logs.
+- **Test Failures:** Examine test reports and logs for detailed error information.
+
+### 10. Appendix
+
+- **Jenkinsfile Examples:** Refer to the detailed Jenkinsfile examples provided above.
+- **Helm Chart Configuration:** Include Helm chart configuration details for deploying applications.
