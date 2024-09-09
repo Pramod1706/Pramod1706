@@ -28,10 +28,16 @@ pipeline {
                         to: "user1@example.com,user2@example.com"
                     )
 
-                    // Wait for manual approval from the specified approvers
-                    input message: 'Do you approve moving to UAT?',
-                          ok: 'Yes, proceed to UAT',
-                          submitter: env.APPROVERS  // Restrict approval to specific users
+                    // Wait for manual approval with "Yes" and "No" options
+                    def userInput = input message: 'Do you approve moving to UAT?',
+                                       ok: 'Yes, proceed to UAT',
+                                       submitter: env.APPROVERS,  // Restrict approval to specific users
+                                       parameters: [choice(name: 'Approval', choices: ['Yes', 'No'], description: 'Approve or Reject')]
+
+                    // Handle "No" case
+                    if (userInput == 'No') {
+                        error 'Deployment to UAT rejected by approver'
+                    }
                 }
             }
         }
