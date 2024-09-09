@@ -1,55 +1,45 @@
 pipeline {
     agent any
 
-    environment {
-        // Store approvers in a hidden environment variable or retrieve from Jenkins credentials
-        APPROVERS = 'user1,user2'  // Hardcode approvers here or use credentials('approvers')
+    parameters {
+        // Simulate checkmarks using boolean parameters
+        booleanParam(name: 'RUN_BUILD', defaultValue: true, description: 'Run Build Stage')
+        booleanParam(name: 'RUN_TEST', defaultValue: true, description: 'Run Test Stage')
+        booleanParam(name: 'RUN_DEPLOY', defaultValue: true, description: 'Run Deploy Stage')
     }
 
     stages {
-        stage('CI Deployment') {
+        stage('Build') {
+            when {
+                expression { return params.RUN_BUILD }
+            }
             steps {
-                script {
-                    // Simulate CI deployment
-                    echo 'Deploying to CI...'
-                    // Add your CI deployment steps here
-
-                    // Send an email notifying approvers
-                    emailext (
-                        subject: "Approval Needed: CI Deployed, Move to UAT",
-                        body: """
-                            The project has been successfully deployed to CI.
-                            Please approve or reject the move to the UAT environment.
-
-                            Only the following users can approve this request: ${env.APPROVERS}
-
-                            Go to Jenkins to approve: ${env.BUILD_URL}
-                        """,
-                        to: "user1@example.com,user2@example.com"
-                    )
-
-                    // Wait for manual approval with "Yes" and "No" options
-                    def userInput = input message: 'Do you approve moving to UAT?',
-                                       ok: 'Yes, proceed to UAT',
-                                       submitter: env.APPROVERS,  // Restrict approval to specific users
-                                       parameters: [choice(name: 'Approval', choices: ['Yes', 'No'], description: 'Approve or Reject')]
-
-                    // Handle "No" case
-                    if (userInput == 'No') {
-                        error 'Deployment to UAT rejected by approver'
-                    }
-                }
+                echo 'Running Build Stage...'
+                // Add your build steps here
             }
         }
 
-        stage('Deploy to UAT') {
+        stage('Test') {
+            when {
+                expression { return params.RUN_TEST }
+            }
             steps {
-                echo 'Deploying to UAT...'
-                // Add UAT deployment steps here
+                echo 'Running Test Stage...'
+                // Add your test steps here
+            }
+        }
+
+        stage('Deploy') {
+            when {
+                expression { return params.RUN_DEPLOY }
+            }
+            steps {
+                echo 'Running Deploy Stage...'
+                // Add your deploy steps here
             }
         }
     }
-
+    
     post {
         always {
             echo 'Pipeline completed.'
