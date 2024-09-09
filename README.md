@@ -1,36 +1,52 @@
-To scale down a StatefulSet using the Kubernetes command-line interface (kubectl) in the console, follow these steps:
+pipeline {
+    agent any
 
-1. **Identify the StatefulSet**:
-   - First, ensure you know the name of the StatefulSet you want to scale down:
-     ```sh
-     kubectl get statefulsets
-     ```
+    environment {
+        // Store approvers in a hidden environment variable or retrieve from Jenkins credentials
+        APPROVERS = 'user1,user2'  // Hardcode approvers here or use credentials('approvers')
+    }
 
-2. **Scale Down the StatefulSet**:
-   - Use the `kubectl scale` command to reduce the number of replicas. Replace `<statefulset-name>` with the name of your StatefulSet and `<desired-replicas>` with the new number of replicas you want:
-     ```sh
-     kubectl scale statefulset <statefulset-name> --replicas=<desired-replicas>
-     ```
+    stages {
+        stage('CI Deployment') {
+            steps {
+                script {
+                    // Simulate CI deployment
+                    echo 'Deploying to CI...'
+                    // Add your CI deployment steps here
 
-     For example, to scale down to 2 replicas:
-     ```sh
-     kubectl scale statefulset my-statefulset --replicas=2
-     ```
+                    // Send an email notifying approvers
+                    emailext (
+                        subject: "Approval Needed: CI Deployed, Move to UAT",
+                        body: """
+                            The project has been successfully deployed to CI.
+                            Please approve or reject the move to the UAT environment.
 
-3. **Verify the Change**:
-   - Check the status of the StatefulSet to ensure it has scaled down correctly:
-     ```sh
-     kubectl get statefulset <statefulset-name>
-     ```
+                            Only the following users can approve this request: ${env.APPROVERS}
 
-     This command will show the current number of replicas along with other details about the StatefulSet.
+                            Go to Jenkins to approve: ${env.BUILD_URL}
+                        """,
+                        to: "user1@example.com,user2@example.com"
+                    )
 
-4. **Optional: Monitor the Scaling Process**:
-   - You can watch the progress of the scaling operation:
-     ```sh
-     kubectl get pods -l app=<label-selector> -w
-     ```
+                    // Wait for manual approval from the specified approvers
+                    input message: 'Do you approve moving to UAT?',
+                          ok: 'Yes, proceed to UAT',
+                          submitter: env.APPROVERS  // Restrict approval to specific users
+                }
+            }
+        }
 
-     Replace `<label-selector>` with the appropriate label that matches your StatefulSet pods.
+        stage('Deploy to UAT') {
+            steps {
+                echo 'Deploying to UAT...'
+                // Add UAT deployment steps here
+            }
+        }
+    }
 
-By following these steps, you can effectively scale down a StatefulSet directly from the console using kubectl commands.
+    post {
+        always {
+            echo 'Pipeline completed.'
+        }
+    }
+}
