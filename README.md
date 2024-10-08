@@ -1,99 +1,140 @@
-Yes, you can use the jiraIssueSelector step in your Jenkins pipeline if you want to select an existing Jira issue instead of creating a new one. The jiraIssueSelector allows you to search for an issue in Jira and use it later in your pipeline.
+To create a Jira ticket using the Jira REST API in a Jenkinsfile, you can use the httpRequest step provided by the Pipeline: Basic Steps plugin in Jenkins. This approach allows you to make an HTTP POST request to the Jira API to create an issue.
 
-Here’s how to incorporate jiraIssueSelector into your Jenkinsfile along with the creation of a new issue or updating an existing issue.
+Here’s a step-by-step guide on how to do this, including a complete Jenkinsfile example.
 
-Example Jenkinsfile Using jiraIssueSelector
+Step 1: Set Up Jira Credentials in Jenkins
+
+1. Go to your Jenkins Dashboard.
+
+
+2. Click on Manage Jenkins.
+
+
+3. Select Manage Credentials.
+
+
+4. Click on the appropriate domain or select (global).
+
+
+5. Click on Add Credentials.
+
+
+6. Choose Username with password.
+
+
+7. Enter your Jira username and password (or API token).
+
+
+8. Assign an ID (e.g., jira-credentials), which will be used in the Jenkinsfile.
+
+
+
+Step 2: Create the Jenkinsfile
+
+Here’s an example of a Jenkinsfile that uses the Jira REST API to create an issue:
 
 pipeline {
-    agent any
+    agent { label 'cm-linux' }  // Specify the Jenkins agent
 
     environment {
-        JIRA_SITE = 'your-jira-site' // Replace with your Jira site configuration name
-        JIRA_PROJECT_KEY = 'YOURPROJECT' // Replace with your Jira project key
-        JIRA_ISSUE_TYPE = 'Task' // Change this if you need a different issue type
+        JIRA_URL = 'https://jira.co.in/jira/rest/api/2/issue' // Jira REST API URL
         JIRA_CREDENTIALS_ID = 'jira-credentials' // ID of the Jira credentials you created
     }
 
     stages {
-        stage('Select or Create Jira Task') {
+        stage('Create Jira Issue') {
             steps {
                 script {
-                    def selectedIssue
+                    def issueData = [
+                        fields: [
+                            project: [
+                                key: 'YOURPROJECT'  // Replace with your Jira project key
+                            ],
+                            summary: 'Automated task from Jenkins',
+                            description: 'This task was created automatically by Jenkins using the REST API.',
+                            issuetype: [
+                                name: 'Task'  // Change to your required issue type
+                            ]
+                        ]
+                    ]
 
-                    // Authenticate with Jira using credentials
-                    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: env.JIRA_CREDENTIALS_ID, usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_PASS']]) {
-                        // Use jiraIssueSelector to select an existing issue
-                        selectedIssue = jiraIssueSelector(
-                            site: env.JIRA_SITE,
-                            query: "project = '${env.JIRA_PROJECT_KEY}'", // Customize your query as needed
-                            username: env.JIRA_USER,
-                            password: env.JIRA_PASS
+                    // Convert issue data to JSON format
+                    def jsonData = groovy.json.JsonOutput.toJson(issueData)
+
+                    withCredentials([usernamePassword(credentialsId: env.JIRA_CREDENTIALS_ID, usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_PASS')]) {
+                        def response = httpRequest(
+                            acceptType: 'APPLICATION_JSON',
+                            contentType: 'APPLICATION_JSON',
+                            httpMode: 'POST',
+                            requestBody: jsonData,
+                            url: env.JIRA_URL,
+                            authentication: env.JIRA_CREDENTIALS_ID
                         )
 
-                        if (selectedIssue) {
-                            echo "Selected existing Jira issue: ${selectedIssue.key} - ${selectedIssue.self}"
-                        } else {
-                            // If no issue is selected, create a new one
-                            def summary = "Automated task from Jenkins"
-                            def description = "This task was created automatically by Jenkins pipeline."
-
-                            def newIssue = jiraNewIssue(
-                                site: env.JIRA_SITE,
-                                projectKey: env.JIRA_PROJECT_KEY,
-                                issueType: env.JIRA_ISSUE_TYPE,
-                                summary: summary,
-                                description: description,
-                                username: env.JIRA_USER,
-                                password: env.JIRA_PASS
-                            )
-
-                            echo "Created new Jira issue: ${newIssue.key} - ${newIssue.self}"
-                        }
+                        // Log the response
+                        echo "Response: ${response.status} - ${response.content}"
+                        
+                        // Parse the response to get the issue key
+                        def jsonResponse = readJSON(text: response.content)
+                        echo "Created Jira issue: ${jsonResponse.key} - ${response.content}"
                     }
                 }
             }
         }
-
-        // Other stages can go here, like building, testing, etc.
     }
 
     post {
         always {
-            // Optional: Clean up or notify, etc.
             echo 'Pipeline finished.'
         }
     }
 }
 
-Key Changes and Explanation:
+Explanation of the Script:
 
-1. Jira Issue Selector:
+1. Environment Variables:
 
-The jiraIssueSelector step is used to find an existing issue based on a query. In this example, it queries all issues in the specified project.
+JIRA_URL: The URL of the Jira REST API endpoint to create issues.
 
-If an issue is found, its details are echoed; otherwise, a new issue is created using jiraNewIssue.
-
-
-
-2. Authentication:
-
-The same credentials handling using withCredentials ensures that the Jira username and password are securely accessed.
+JIRA_CREDENTIALS_ID: The ID of the credentials used to authenticate with Jira.
 
 
 
-3. Conditional Logic:
+2. Issue Data:
 
-A simple conditional check determines whether to select an existing issue or create a new one based on the result of the jiraIssueSelector.
+The issueData map defines the fields required to create a Jira issue, including the project key, summary, description, and issue type. Make sure to replace 'YOURPROJECT' with your actual Jira project key.
+
+
+
+3. JSON Conversion:
+
+The groovy.json.JsonOutput.toJson(issueData) method converts the issueData map to a JSON string, which is required for the API request.
+
+
+
+4. HTTP Request:
+
+The httpRequest step sends a POST request to the Jira API, including the JSON data in the request body and using the credentials for authentication.
+
+The response from the Jira API is logged, and the issue key of the created issue is printed.
+
+
+
+5. Error Handling:
+
+You can add additional error handling logic based on the response status to manage unsuccessful requests.
 
 
 
 
 Important Notes:
 
-Modify the query parameter in the jiraIssueSelector to refine your search based on your needs.
+Make sure the HTTP Request Plugin is installed in your Jenkins instance.
 
-Ensure that your Jenkins environment has the necessary permissions to access and create issues in Jira.
+Ensure that your Jira API token (if using one) has the necessary permissions to create issues in the specified project.
 
-Replace the placeholders with actual values relevant to your Jira setup.
+Update the placeholders in the script to match your Jira configuration and project details.
+
+Test the pipeline in a controlled environment to ensure it works as expected before using it in production.
 
 
