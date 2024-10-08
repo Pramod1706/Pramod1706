@@ -1,140 +1,156 @@
-To create a Jira ticket using the Jira REST API in a Jenkinsfile, you can use the httpRequest step provided by the Pipeline: Basic Steps plugin in Jenkins. This approach allows you to make an HTTP POST request to the Jira API to create an issue.
+The HTTP 400 error with the message indicating the status code is not within the accepted range of 100-399 suggests that the server cannot process the request due to client-side issues, such as bad syntax or invalid request parameters. Since you mentioned that Postman works fine, it's essential to ensure that your Jenkinsfile is sending an identical request.
 
-Here’s a step-by-step guide on how to do this, including a complete Jenkinsfile example.
+Steps to Diagnose the 400 Error
 
-Step 1: Set Up Jira Credentials in Jenkins
+1. Compare Requests: Ensure the request made by Jenkins is identical to the one in Postman, including:
 
-1. Go to your Jenkins Dashboard.
+The URL.
 
+HTTP method (POST).
 
-2. Click on Manage Jenkins.
+Headers (especially Content-Type).
 
+Body (ensure the JSON payload structure is the same).
 
-3. Select Manage Credentials.
-
-
-4. Click on the appropriate domain or select (global).
-
-
-5. Click on Add Credentials.
-
-
-6. Choose Username with password.
-
-
-7. Enter your Jira username and password (or API token).
-
-
-8. Assign an ID (e.g., jira-credentials), which will be used in the Jenkinsfile.
+Authentication.
 
 
 
-Step 2: Create the Jenkinsfile
+2. Inspect the API Response: If the server returns a message with the 400 response, inspect it for clues. Sometimes, the server includes additional information about what went wrong.
 
-Here’s an example of a Jenkinsfile that uses the Jira REST API to create an issue:
+
+3. Log Complete Response: Ensure you're logging the entire response content from the API to see if there's a more detailed error message.
+
+
+
+Updated Jenkinsfile with Enhanced Logging
+
+Here’s a modified version of your Jenkinsfile that includes enhanced logging and troubleshooting capabilities. It helps ensure all elements of the request are accounted for:
+
+import groovy.json.JsonOutput
+import groovy.json.JsonSlurper
 
 pipeline {
-    agent { label 'cm-linux' }  // Specify the Jenkins agent
+    agent {
+        node { label 'cm-linux' }
+    }
 
     environment {
-        JIRA_URL = 'https://jira.co.in/jira/rest/api/2/issue' // Jira REST API URL
-        JIRA_CREDENTIALS_ID = 'jira-credentials' // ID of the Jira credentials you created
+        CR_minion_URL = "https://cr-minion.uk.hsbc/api/v3/create" // Your custom API URL
+        CR_CREDENTIALS_ID = 'Temp_Credentials-testing' // ID of the credentials for authentication
     }
 
     stages {
-        stage('Create Jira Issue') {
+        stage('Create CR') {
             steps {
                 script {
                     def issueData = [
                         fields: [
-                            project: [
-                                key: 'YOURPROJECT'  // Replace with your Jira project key
-                            ],
-                            summary: 'Automated task from Jenkins',
-                            description: 'This task was created automatically by Jenkins using the REST API.',
-                            issuetype: [
-                                name: 'Task'  // Change to your required issue type
-                            ]
+                            assignmentGroup: "HISE-GRA-WREN",
+                            application: "WREN",
+                            ticketRef: "MXE-9991",
+                            ticketSource: "JIRA",
+                            modelChangeRequest: "CAS68594",
+                            scheduleStartDateTime: "2024-10-30T10:36:00",
+                            duration: "120",
+                            changeType: "Normal",
+                            changeSubType: "None",
+                            changeCategory: "Software",
+                            businessJustification: '''
+                                1) Reason for Change - This change is implemented to add a new endpoint to retrieve a previously created Rating Request record
+                                2) Benefits of Implementing: With this implementation will retrieve the rating request record based on rating request id
+                                3) Impact if not implemented: Will not have provision to retrieve the rating request record
+                                4) CR involves any data movement or not, if yes, is it automated or manual?
+                            ''',
+                            businessImpact: '''
+                                This change is implemented as part of the early-Show WREN CD pipeline. The pipeline uses HELM to perform a rolling update of API pods across PROD/CONT ID.
+                                Backout Plan: GRA-WREN can automatically revert to previous version.
+                                Verification plan: WREN IT Team will perform the basic verification and Product owner (Andrew Gemmill) will confirm the release result.
+                            ''',
+                            isBackOutPlanTested: "No",
+                            isPreImplTestDone: "No",
+                            isPostImplTestPlanned: "Yes",
+                            businessService: "GRA-WREN",
+                            serviceOffering: "GRA-WREN App Support",
+                            eimAppId: "11497556",
+                            changeAction: "",
+                            changePurpose: "new_features",
+                            expediteFlag: false,
+                            riskFlag: false,
+                            resetApprovalsFlag: false,
+                            enableCopyChangeTasks: true,
+                            enableCopyPAMTasks: true,
+                            enableCopyApprovalTasks: false,
+                            createImplementationTask: false,
+                            createBackoutTask: false,
+                            createVerificationTask: false
                         ]
                     ]
 
                     // Convert issue data to JSON format
-                    def jsonData = groovy.json.JsonOutput.toJson(issueData)
+                    def jsonData = JsonOutput.toJson(issueData)
+                    echo "JSON Data: ${jsonData}" // Log the JSON data being sent
 
-                    withCredentials([usernamePassword(credentialsId: env.JIRA_CREDENTIALS_ID, usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_PASS')]) {
-                        def response = httpRequest(
-                            acceptType: 'APPLICATION_JSON',
-                            contentType: 'APPLICATION_JSON',
-                            httpMode: 'POST',
-                            requestBody: jsonData,
-                            url: env.JIRA_URL,
-                            authentication: env.JIRA_CREDENTIALS_ID
-                        )
+                    // Send the HTTP request to create the CR
+                    withCredentials([usernamePassword(credentialsId: env.CR_CREDENTIALS_ID, usernameVariable: 'API_USER', passwordVariable: 'API_PASS')]) {
+                        try {
+                            def response = httpRequest(
+                                authentication: env.CR_CREDENTIALS_ID,
+                                httpMode: 'POST',
+                                contentType: 'APPLICATION_JSON',
+                                url: env.CR_minion_URL,
+                                requestBody: jsonData,
+                                timeout: 180
+                            )
 
-                        // Log the response
-                        echo "Response: ${response.status} - ${response.content}"
-                        
-                        // Parse the response to get the issue key
-                        def jsonResponse = readJSON(text: response.content)
-                        echo "Created Jira issue: ${jsonResponse.key} - ${response.content}"
+                            // Log the response status and content
+                            echo "Response Status: ${response.status}"
+                            echo "Response Content: ${response.content}" // Log the entire response content for debugging
+
+                            // Optionally parse the response if you expect a JSON response
+                            if (response.status == 200 || response.status == 201) {
+                                def jsonResponse = readJSON(text: response.content)
+                                echo "Created CR Details: ${jsonResponse.key} - ${response.content}"
+                            } else {
+                                error "Failed to create CR. HTTP status: ${response.status}, Response: ${response.content}"
+                            }
+                        } catch (Exception e) {
+                            echo "Error occurred while sending request: ${e.message}"
+                            error "Request failed: ${e.message}"
+                        }
                     }
                 }
             }
         }
     }
-
-    post {
-        always {
-            echo 'Pipeline finished.'
-        }
-    }
 }
 
-Explanation of the Script:
+Key Changes and Additions
 
-1. Environment Variables:
+Error Handling: Wrapped the HTTP request in a try-catch block to log any exceptions.
 
-JIRA_URL: The URL of the Jira REST API endpoint to create issues.
+Detailed Logging: Echoing the JSON data being sent and the entire response for better diagnostics.
 
-JIRA_CREDENTIALS_ID: The ID of the credentials used to authenticate with Jira.
-
-
-
-2. Issue Data:
-
-The issueData map defines the fields required to create a Jira issue, including the project key, summary, description, and issue type. Make sure to replace 'YOURPROJECT' with your actual Jira project key.
+Enhanced Structure: Ensures all fields are included in the JSON payload, which you can adjust based on what Postman sends.
 
 
+Additional Tips
 
-3. JSON Conversion:
-
-The groovy.json.JsonOutput.toJson(issueData) method converts the issueData map to a JSON string, which is required for the API request.
-
+1. Use Postman’s Console: Open the Postman console (View > Show Postman Console) to see the exact request being sent, including headers and payload. Compare it to the Jenkins output.
 
 
-4. HTTP Request:
+2. Check Network Issues: Sometimes, network policies might differ between Postman and Jenkins, such as firewall rules or proxy settings.
 
-The httpRequest step sends a POST request to the Jira API, including the JSON data in the request body and using the credentials for authentication.
 
-The response from the Jira API is logged, and the issue key of the created issue is printed.
+3. Contact API Support: If issues persist, consider reaching out to the API support team for specific insights regarding what might be causing the 400 error when called from Jenkins.
+
+
+4. Run Locally: If possible, run a simple curl command locally (with the same payload) to see if it works outside of Jenkins. This can help isolate the problem.
+
+
+5. Field Validation: Double-check with the API documentation to ensure that all required fields are filled correctly, and data types match what the API expects.
 
 
 
-5. Error Handling:
-
-You can add additional error handling logic based on the response status to manage unsuccessful requests.
-
-
-
-
-Important Notes:
-
-Make sure the HTTP Request Plugin is installed in your Jenkins instance.
-
-Ensure that your Jira API token (if using one) has the necessary permissions to create issues in the specified project.
-
-Update the placeholders in the script to match your Jira configuration and project details.
-
-Test the pipeline in a controlled environment to ensure it works as expected before using it in production.
-
+Let me know if you have any further questions or need more assistance!
 
