@@ -1,101 +1,148 @@
-To create a JIRA issue in Jenkins using the JIRA Plugin with credentials for authentication, you can modify your Jenkinsfile to leverage the jiraNewIssue step while specifying the necessary credentials.
+To create a JIRA ticket using the JIRA REST API from a Jenkins Pipeline, you'll need to use curl to send a POST request to the JIRA API endpoint for creating issues. Below is a detailed guide and example Jenkinsfile to accomplish this.
 
-Updated Jenkinsfile with Credentials
+Step-by-Step Guide
 
-Assuming you've already configured the JIRA site in Jenkins' global settings and set up the credentials, here’s how to write your Jenkinsfile:
+1. JIRA API Requirements:
+
+You need the JIRA instance URL.
+
+API Token for authentication.
+
+JIRA Project Key where you want to create the issue.
+
+
+
+2. Generate API Token:
+
+Log into your JIRA account.
+
+Go to Account settings > Security > API token.
+
+Click on Create API token, then copy the generated token.
+
+
+
+3. Configure Jenkins Credentials:
+
+Go to Jenkins Dashboard > Manage Jenkins > Manage Credentials.
+
+Click on the appropriate domain (e.g., Global) > Add Credentials.
+
+Choose Secret text for the token or Username with password for username and API token.
+
+Enter the username (usually your email) and the API token.
+
+Save it with an ID, e.g., jira-credentials.
+
+
+
+
+Example Jenkinsfile to Create JIRA Ticket via REST API
+
+Here is a sample Jenkinsfile that creates a JIRA ticket using the REST API:
 
 pipeline {
     agent any
 
     environment {
-        JIRA_SITE = 'your-jira-site'  // Defined in Jenkins Global Configuration
-        JIRA_CREDENTIALS_ID = 'jira-credentials'  // The ID of your JIRA credentials in Jenkins
+        JIRA_URL = 'https://your-jira-url.atlassian.net' // Replace with your JIRA URL
+        JIRA_USER = 'your-jira-email@example.com' // Your JIRA username (usually your email)
+        JIRA_API_TOKEN = credentials('jira-credentials') // Use credentials ID created in Jenkins
+        JIRA_PROJECT_KEY = 'PROJ' // Replace with your JIRA project key
     }
 
     stages {
         stage('Create JIRA Issue') {
             steps {
                 script {
-                    // Use the credentials defined in Jenkins to authenticate
-                    withCredentials([usernamePassword(credentialsId: "${JIRA_CREDENTIALS_ID}", usernameVariable: 'JIRA_USER', passwordVariable: 'JIRA_API_TOKEN')]) {
-                        jiraNewIssue site: "${JIRA_SITE}", 
-                                     projectKey: 'PROJ', 
-                                     summary: 'Automated ticket created from Jenkins', 
-                                     description: 'This is a test issue created by Jenkins', 
-                                     issueType: 'Task', 
-                                     credentialsId: "${JIRA_CREDENTIALS_ID}"
-                    }
+                    // Define the JIRA issue payload
+                    def jiraIssue = [
+                        fields: [
+                            project: [
+                                key: "${JIRA_PROJECT_KEY}"
+                            ],
+                            summary: "Automated ticket created from Jenkins",
+                            description: "This is a test issue created by Jenkins",
+                            issuetype: [
+                                name: "Task" // Change to Bug, Story, etc. as needed
+                            ]
+                        ]
+                    ]
+
+                    // Convert the payload to JSON
+                    def jiraIssueJson = groovy.json.JsonOutput.toJson(jiraIssue)
+
+                    // Create the JIRA issue using a curl command
+                    sh """
+                    curl -X POST \
+                    -H "Content-Type: application/json" \
+                    -u ${JIRA_USER}:${JIRA_API_TOKEN} \
+                    --data '${jiraIssueJson}' \
+                    ${JIRA_URL}/rest/api/2/issue/
+                    """
                 }
             }
         }
     }
 }
 
-Key Changes and Explanation
+Explanation of the Jenkinsfile
 
-1. Credentials ID:
+1. Environment Variables:
 
-Replace 'jira-credentials' with the ID of your JIRA credentials that you have stored in Jenkins.
+JIRA_URL: Your JIRA instance URL.
 
+JIRA_USER: Your JIRA username (email).
 
+JIRA_API_TOKEN: The API token retrieved from Jenkins credentials.
 
-2. withCredentials Block:
-
-The withCredentials step is used to temporarily set environment variables for the credentials. Here, usernamePassword is used to retrieve both the username and API token stored in Jenkins.
-
-usernameVariable is set to JIRA_USER, and passwordVariable is set to JIRA_API_TOKEN. These variables can be referenced later in your script if needed.
+JIRA_PROJECT_KEY: The key of the JIRA project where you want to create the issue.
 
 
 
-3. jiraNewIssue Step:
+2. JIRA Issue Definition:
 
-The jiraNewIssue step is called to create the issue. The credentialsId parameter is included to specify the credentials used for authentication.
+The issue to be created is defined in the jiraIssue variable. It includes:
 
+Project: Identifies the JIRA project.
 
+Summary: The title of the JIRA issue.
 
+Description: A detailed description of the JIRA issue.
 
-Configuring JIRA Credentials in Jenkins
-
-1. Go to Jenkins Dashboard.
-
-
-2. Manage Jenkins > Manage Credentials > (Global) or the appropriate domain.
-
-
-3. Add Credentials:
-
-Choose Kind: Username with password.
-
-Username: Your JIRA username (usually your email).
-
-Password: Your JIRA API token.
-
-ID: Give it a unique ID (like jira-credentials).
+Issue Type: The type of issue to be created (e.g., Task, Bug, Story).
 
 
 
 
-Example JIRA Issue JSON Payload
+3. JSON Conversion:
 
-When this Jenkinsfile is executed, it creates a JIRA issue with the following details:
-
-Project Key: PROJ
-
-Summary: Automated ticket created from Jenkins
-
-Description: This is a test issue created by Jenkins
-
-Issue Type: Task
+The groovy.json.JsonOutput.toJson method converts the Groovy map to a JSON string.
 
 
-Additional Notes
 
-Ensure that the JIRA project key (PROJ) matches the key of an existing project in your JIRA instance.
+4. curl Command:
 
-You can adjust the summary, description, and issueType parameters as needed for your specific use case.
+This command sends a POST request to the JIRA API to create the issue. It includes:
 
-Make sure you have the necessary permissions in JIRA to create issues in the specified project.
+Content-Type Header: Specifies the request format as JSON.
+
+Authorization: Uses basic auth with the username and API token.
+
+Data: Sends the JSON payload containing the issue details.
 
 
-This setup will allow you to create JIRA issues seamlessly from your Jenkins pipeline using the JIRA Plugin and the stored credentials. Let me know if you have any questions or need further adjustments!
+
+
+
+Important Notes
+
+Ensure Proper Permissions: Make sure your JIRA user has permissions to create issues in the specified project.
+
+Issue Type: You can customize the issuetype field based on the types available in your JIRA instance.
+
+Error Handling: You may want to add error handling to check if the curl command was successful and log the response.
+
+
+This Jenkinsfile allows you to automate the creation of JIRA tickets directly from your Jenkins pipeline using the JIRA REST API. Let me know if you have any questions or need further assistance!
 
