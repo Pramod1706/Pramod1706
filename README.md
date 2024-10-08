@@ -1,48 +1,18 @@
 pipeline {
     agent any
 
-    parameters {
-        // Simulate checkmarks using boolean parameters
-        booleanParam(name: 'RUN_BUILD', defaultValue: true, description: 'Run Build Stage')
-        booleanParam(name: 'RUN_TEST', defaultValue: true, description: 'Run Test Stage')
-        booleanParam(name: 'RUN_DEPLOY', defaultValue: true, description: 'Run Deploy Stage')
+    environment {
+        JIRA_SITE = 'your-jira-site'  // Defined in Jenkins Global Configuration
     }
 
     stages {
-        stage('Build') {
-            when {
-                expression { return params.RUN_BUILD }
-            }
+        stage('Create JIRA Issue') {
             steps {
-                echo 'Running Build Stage...'
-                // Add your build steps here
+                jiraNewIssue site: "${JIRA_SITE}", projectKey: 'PROJ', 
+                             summary: 'Automated ticket created from Jenkins', 
+                             description: 'This is a test issue created by Jenkins', 
+                             issueType: 'Task'
             }
-        }
-
-        stage('Test') {
-            when {
-                expression { return params.RUN_TEST }
-            }
-            steps {
-                echo 'Running Test Stage...'
-                // Add your test steps here
-            }
-        }
-
-        stage('Deploy') {
-            when {
-                expression { return params.RUN_DEPLOY }
-            }
-            steps {
-                echo 'Running Deploy Stage...'
-                // Add your deploy steps here
-            }
-        }
-    }
-    
-    post {
-        always {
-            echo 'Pipeline completed.'
         }
     }
 }
