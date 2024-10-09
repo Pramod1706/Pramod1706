@@ -1,95 +1,89 @@
-Your Jenkins pipeline script for triggering an Ansible Tower job looks good. However, I’ll provide a few enhancements and best practices to ensure it functions correctly. Here are a few things to consider:
+To trigger an Ansible Tower (now part of Red Hat Ansible Automation Platform) job template from a Jenkinsfile, you can use the curl command to send a POST request to the Ansible Tower API. Here's a step-by-step guide on how to do it:
 
-Enhanced Jenkins Pipeline Script
+Prerequisites
 
-1. Use of Environment Variables: Make sure to set TOWER_SERVER, JOB_TEMPLATE, and CREDENTIAL with the actual values required for your Ansible Tower setup.
-
-
-2. Error Handling: Consider adding error handling to capture any failures when triggering the job.
+1. Ansible Tower: Make sure you have Ansible Tower installed and configured.
 
 
-3. Output Logs: Including more output for better debugging can help understand the state of the pipeline.
+2. API Token: Generate an API token in Ansible Tower for authentication.
 
 
-4. Pipeline Syntax: Ensure your syntax aligns with the current Jenkins version, especially if you’re using specific plugins.
+3. Jenkins: Ensure Jenkins is set up and you have access to modify the Jenkinsfile.
 
 
 
-Here's an improved version of your Jenkinsfile:
+Sample Jenkinsfile
+
+Here's a basic example of how your Jenkinsfile could look to trigger an Ansible Tower job template:
 
 pipeline {
     agent any
 
     environment {
-        TOWER_SERVER = 'your-tower-server' // Name of the Ansible Tower server configured in Jenkins
-        JOB_TEMPLATE = 'your-job-template'   // Name of the job template in Ansible Tower
-        CREDENTIAL_ID = 'your-credential-id' // ID of the credential configured in Jenkins
+        ANSIBLE_TOWER_URL = 'https://<your_ansible_tower_url>'
+        ANSIBLE_TOWER_JOB_TEMPLATE_ID = '<your_job_template_id>'
+        ANSIBLE_TOWER_TOKEN = '<your_api_token>'
     }
 
     stages {
         stage('Trigger Ansible Tower Job') {
             steps {
                 script {
-                    try {
-                        // Trigger the Ansible Tower job
-                        def towerJob = ansibleTower(
-                            towerServer: "${TOWER_SERVER}",
-                            templateType: 'job',
-                            jobTemplate: "${JOB_TEMPLATE}",
-                            importTowerLogs: true,
-                            removeColor: true,
-                            credential: "${CREDENTIAL_ID}",
-                            extraVars: [
-                                build_number: "${env.BUILD_NUMBER}",
-                                // Add any other extra variables as needed
-                            ]
-                        )
-                        echo "Triggered Ansible Tower job with build number: ${env.BUILD_NUMBER}"
-                        echo "Tower Job ID: ${towerJob.id}" // Log the job ID for reference
-                        echo "Tower Job Status: ${towerJob.status}" // Log the job status for reference
-                    } catch (Exception e) {
-                        // Handle any exceptions that occur
-                        echo "Failed to trigger Ansible Tower job: ${e.message}"
-                        currentBuild.result = 'FAILURE' // Mark the build as failed
-                    }
+                    def response = sh(script: """
+                        curl -s -X POST -H "Authorization: Bearer ${ANSIBLE_TOWER_TOKEN}" \
+                        -H "Content-Type: application/json" \
+                        -d '{
+                            "job_template": "${ANSIBLE_TOWER_JOB_TEMPLATE_ID}",
+                            "extra_vars": {
+                                "example_var": "value"
+                            }
+                        }' \
+                        ${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_JOB_TEMPLATE_ID}/launch/
+                    """, returnStdout: true)
+
+                    echo "Response from Ansible Tower: ${response}"
                 }
             }
         }
     }
-
-    post {
-        success {
-            echo 'Ansible Tower job triggered successfully.'
-        }
-        failure {
-            echo 'Ansible Tower job failed to trigger.'
-        }
-    }
 }
 
-Key Enhancements:
+Breakdown of the Jenkinsfile
 
-Error Handling: A try-catch block is added to catch and log any exceptions when triggering the Ansible Tower job.
+1. Environment Variables:
 
-Job ID and Status Logging: Logs the job ID and status for better traceability.
+ANSIBLE_TOWER_URL: The base URL for your Ansible Tower instance.
 
-Post Actions: Added post actions to log messages based on the success or failure of the stage.
+ANSIBLE_TOWER_JOB_TEMPLATE_ID: The ID of the job template you want to trigger.
 
-
-Things to Verify:
-
-1. Ansible Tower Plugin: Ensure the Jenkins Ansible Tower plugin is correctly installed and configured.
-
-
-2. Credentials Configuration: Verify that the credential ID matches one set up in Jenkins, and it has the correct permissions to execute jobs in Ansible Tower.
-
-
-3. Server and Template Names: Make sure TOWER_SERVER and JOB_TEMPLATE are correct and match what is configured in Ansible Tower.
+ANSIBLE_TOWER_TOKEN: The API token for authentication.
 
 
 
-Running the Pipeline
+2. Trigger Stage:
 
-Once you've made the necessary adjustments and ensured all values are correctly set, you can run this pipeline in Jenkins. If you encounter any issues, the enhanced logging will help in debugging.
+Use the curl command to make a POST request to the Ansible Tower API.
 
-Let me know if you need any further assistance!
+The -d flag is used to pass any extra variables you may want to include when launching the job template.
+
+
+
+3. Response Handling:
+
+The response from the Ansible Tower API is printed to the Jenkins console for verification.
+
+
+
+
+Additional Considerations
+
+Make sure to replace placeholder values (<your_ansible_tower_url>, <your_job_template_id>, <your_api_token>) with your actual values.
+
+Ensure that your Jenkins server has access to the Ansible Tower API endpoint.
+
+Handle any required SSL certificates if you're using HTTPS.
+
+You can expand the extra_vars section in the JSON body to pass more variables to your job template as needed.
+
+
+This setup allows Jenkins to trigger Ansible Tower job templates as part of your CI/CD pipeline, enabling seamless integration between the two tools.
