@@ -1,20 +1,37 @@
-To trigger an Ansible Tower (now part of Red Hat Ansible Automation Platform) job template from a Jenkinsfile, you can use the curl command to send a POST request to the Ansible Tower API. Here's a step-by-step guide on how to do it:
+To use Jenkins credentials (username and password) to authenticate with Ansible Tower, you can utilize the Jenkins Credentials Plugin to securely store and access your credentials. Here's how you can do it:
 
-Prerequisites
+Step-by-Step Guide
 
-1. Ansible Tower: Make sure you have Ansible Tower installed and configured.
+1. Store Credentials in Jenkins:
+
+Go to your Jenkins instance.
+
+Navigate to Manage Jenkins > Manage Credentials.
+
+Choose the appropriate domain (or the global domain).
+
+Click on Add Credentials.
+
+Select Username with password.
+
+Fill in the Username and Password fields for your Ansible Tower account.
+
+Give it an ID (for example, ansible-tower-creds) and an optional description.
+
+Click OK to save.
 
 
-2. API Token: Generate an API token in Ansible Tower for authentication.
 
+2. Modify Your Jenkinsfile:
 
-3. Jenkins: Ensure Jenkins is set up and you have access to modify the Jenkinsfile.
+You will need to retrieve the credentials in your Jenkinsfile using the credentials() function. Here's how to do it:
+
 
 
 
 Sample Jenkinsfile
 
-Here's a basic example of how your Jenkinsfile could look to trigger an Ansible Tower job template:
+Here’s an updated version of your Jenkinsfile that retrieves Ansible Tower credentials from Jenkins:
 
 pipeline {
     agent any
@@ -22,26 +39,28 @@ pipeline {
     environment {
         ANSIBLE_TOWER_URL = 'https://<your_ansible_tower_url>'
         ANSIBLE_TOWER_JOB_TEMPLATE_ID = '<your_job_template_id>'
-        ANSIBLE_TOWER_TOKEN = '<your_api_token>'
     }
 
     stages {
         stage('Trigger Ansible Tower Job') {
             steps {
                 script {
-                    def response = sh(script: """
-                        curl -s -X POST -H "Authorization: Bearer ${ANSIBLE_TOWER_TOKEN}" \
-                        -H "Content-Type: application/json" \
-                        -d '{
-                            "job_template": "${ANSIBLE_TOWER_JOB_TEMPLATE_ID}",
-                            "extra_vars": {
-                                "example_var": "value"
-                            }
-                        }' \
-                        ${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_JOB_TEMPLATE_ID}/launch/
-                    """, returnStdout: true)
+                    // Retrieve Jenkins credentials
+                    withCredentials([usernamePassword(credentialsId: 'ansible-tower-creds', usernameVariable: 'TOWER_USERNAME', passwordVariable: 'TOWER_PASSWORD')]) {
+                        def response = sh(script: """
+                            curl -s -X POST -u ${TOWER_USERNAME}:${TOWER_PASSWORD} \
+                            -H "Content-Type: application/json" \
+                            -d '{
+                                "job_template": "${ANSIBLE_TOWER_JOB_TEMPLATE_ID}",
+                                "extra_vars": {
+                                    "example_var": "value"
+                                }
+                            }' \
+                            ${ANSIBLE_TOWER_URL}/api/v2/job_templates/${ANSIBLE_TOWER_JOB_TEMPLATE_ID}/launch/
+                        """, returnStdout: true)
 
-                    echo "Response from Ansible Tower: ${response}"
+                        echo "Response from Ansible Tower: ${response}"
+                    }
                 }
             }
         }
@@ -56,34 +75,32 @@ ANSIBLE_TOWER_URL: The base URL for your Ansible Tower instance.
 
 ANSIBLE_TOWER_JOB_TEMPLATE_ID: The ID of the job template you want to trigger.
 
-ANSIBLE_TOWER_TOKEN: The API token for authentication.
+
+
+2. withCredentials Block:
+
+The withCredentials block is used to access the stored username and password securely.
+
+credentialsId: This should match the ID you set when creating the credentials (e.g., ansible-tower-creds).
+
+usernameVariable and passwordVariable: These are environment variables that will hold the username and password values, respectively.
 
 
 
-2. Trigger Stage:
+3. Triggering the Job:
 
-Use the curl command to make a POST request to the Ansible Tower API.
-
-The -d flag is used to pass any extra variables you may want to include when launching the job template.
-
-
-
-3. Response Handling:
-
-The response from the Ansible Tower API is printed to the Jenkins console for verification.
+The curl command is updated to use the -u option to provide the username and password for basic authentication.
 
 
 
 
-Additional Considerations
+Additional Notes
 
-Make sure to replace placeholder values (<your_ansible_tower_url>, <your_job_template_id>, <your_api_token>) with your actual values.
+Ensure that the Jenkins instance has network access to the Ansible Tower API.
 
-Ensure that your Jenkins server has access to the Ansible Tower API endpoint.
+Handle SSL certificates if your Ansible Tower instance uses HTTPS.
 
-Handle any required SSL certificates if you're using HTTPS.
-
-You can expand the extra_vars section in the JSON body to pass more variables to your job template as needed.
+The extra_vars section can be expanded to include additional variables as needed for your job template.
 
 
-This setup allows Jenkins to trigger Ansible Tower job templates as part of your CI/CD pipeline, enabling seamless integration between the two tools.
+This setup ensures that your Ansible Tower credentials are securely managed within Jenkins while allowing you to trigger job templates from your CI/CD pipeline.
