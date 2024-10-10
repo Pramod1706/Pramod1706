@@ -1,3 +1,5 @@
+Here is the Ansible playbook formatted as per your request:
+
 ---
 - name: Trigger Jenkins job and process results
   hosts: localhost
@@ -81,3 +83,26 @@
       at:
         command: "curl -X POST {{ jenkins_url }}/job/{{ job_name_3 }}/buildWithParameters?A={{ A }}&B={{ B }}&D={{ D }} --user {{ jenkins_user }}:{{ jenkins_token }}"
         time: "{{ change_date }}"
+
+Key Points:
+
+1. Triggering First Jenkins Job: The first Jenkins job is triggered using the parameters A and B.
+
+
+2. Getting Result C: After the first job is complete, its result (C) is fetched.
+
+
+3. Checking Jira Ticket: The Jira ticket is queried to check if it is in "Done" status. If yes, the custom field containing the change date is retrieved.
+
+
+4. Triggering Second Jenkins Job: The second Jenkins job is triggered using the result C and the change date from Jira.
+
+
+5. Getting Result D: The result from the second Jenkins job (D) is fetched.
+
+
+6. Scheduling Third Jenkins Job: The third Jenkins job is scheduled at the retrieved change_date, with parameters A, B, and D.
+
+
+
+Make sure to adjust the placeholders with your actual values, such as URLs, credentials, job names, and Jira field IDs.
