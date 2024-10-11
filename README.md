@@ -1,83 +1,108 @@
----
-- name: Trigger Jenkins job and process results
-  hosts: localhost
-  vars:
-    jenkins_url: "http://your-jenkins-url"
-    jenkins_user: "your-jenkins-username"
-    jenkins_token: "your-jenkins-api-token"
-    jira_url: "http://your-jira-url"
-    jira_user: "your-jira-username"
-    jira_token: "your-jira-api-token"
-    jira_ticket: "JIRA-1234"
-    job_name_1: "first-jenkins-job"
-    job_name_2: "second-jenkins-job"
-    job_name_3: "third-jenkins-job"
-    A: "value_of_A"
-    B: "value_of_B"
+Below is an example of a Jenkinsfile that downloads a .tar.gz file from a Nexus repository, extracts it, and then pushes the content to another Nexus repository. This Jenkinsfile uses shell commands and assumes you are using Maven to interact with Nexus. Modify it according to your environment and credentials.
 
-  tasks:
-    - name: Trigger first Jenkins job
-      uri:
-        url: "{{ jenkins_url }}/job/{{ job_name_1 }}/buildWithParameters?A={{ A }}&B={{ B }}"
-        method: POST
-        user: "{{ jenkins_user }}"
-        password: "{{ jenkins_token }}"
-        status_code: 201
-      register: job_1_response
+pipeline {
+    agent any
 
-    - name: Get result C from first Jenkins job
-      uri:
-        url: "{{ jenkins_url }}/job/{{ job_name_1 }}/lastBuild/api/json"
-        method: GET
-        user: "{{ jenkins_user }}"
-        password: "{{ jenkins_token }}"
-      register: job_1_result
-      until: job_1_result.json.result == "SUCCESS"
-      retries: 5
-      delay: 10
+    environment {
+        NEXUS_DOWNLOAD_REPO_URL = 'http://<nexus-url>/repository/<download-repo>/'
+        NEXUS_UPLOAD_REPO_URL = 'http://<nexus-url>/repository/<upload-repo>/'
+        NEXUS_USERNAME = credentials('nexus-username') // Jenkins credentials ID for Nexus username
+        NEXUS_PASSWORD = credentials('nexus-password') // Jenkins credentials ID for Nexus password
+        FILE_NAME = '<file-name>.tar.gz'
+        GROUP_ID = '<group-id>' // Group ID for upload
+        ARTIFACT_ID = '<artifact-id>' // Artifact ID for upload
+        VERSION = '<version>' // Version of the artifact
+        PACKAGING = 'tar.gz' // File type
+    }
 
-    - name: Set result C
-      set_fact:
-        C: "{{ job_1_result.json.result }}"
+    stages {
+        stage('Download .tar.gz from Nexus') {
+            steps {
+                script {
+                    sh """
+                    # Download the tar.gz file from Nexus
+                    wget --user=${NEXUS_USERNAME} --password=${NEXUS_PASSWORD} ${NEXUS_DOWNLOAD_REPO_URL}${FILE_NAME}
+                    """
+                }
+            }
+        }
 
-    - name: Check Jira ticket status
-      uri:
-        url: "{{ jira_url }}/rest/api/2/issue/{{ jira_ticket }}"
-        method: GET
-        user: "{{ jira_user }}"
-        password: "{{ jira_token }}"
-      register: jira_response
+        stage('Extract the .tar.gz file') {
+            steps {
+                script {
+                    sh """
+                    # Extract the downloaded tar.gz file
+                    tar -xzf ${FILE_NAME}
+                    """
+                }
+            }
+        }
 
-    - name: Get change date if Jira ticket is done
-      set_fact:
-        change_date: "{{ jira_response.json.fields.customfield_12345 }}"
-      when: jira_response.json.fields.status.name == "Done"
+        stage('Push to another Nexus Repository') {
+            steps {
+                script {
+                    sh """
+                    # Prepare the artifact for upload to Nexus (assuming Maven is used)
+                    mvn deploy:deploy-file \
+                    -Dfile=${FILE_NAME} \
+                    -DrepositoryId=nexus-repo \
+                    -Durl=${NEXUS_UPLOAD_REPO_URL} \
+                    -DgroupId=${GROUP_ID} \
+                    -DartifactId=${ARTIFACT_ID} \
+                    -Dversion=${VERSION} \
+                    -Dpackaging=${PACKAGING} \
+                    -DgeneratePom=true \
+                    -Dusername=${NEXUS_USERNAME} \
+                    -Dpassword=${NEXUS_PASSWORD}
+                    """
+                }
+            }
+        }
+    }
 
-    - name: Trigger second Jenkins job with C and change date
-      uri:
-        url: "{{ jenkins_url }}/job/{{ job_name_2 }}/buildWithParameters?C={{ C }}&change_date={{ change_date }}"
-        method: POST
-        user: "{{ jenkins_user }}"
-        password: "{{ jenkins_token }}"
-        status_code: 201
-      register: job_2_response
+    post {
+        success {
+            echo "File successfully uploaded to Nexus repository."
+        }
+        failure {
+            echo "Pipeline failed."
+        }
+    }
+}
 
-    - name: Get result D from second Jenkins job
-      uri:
-        url: "{{ jenkins_url }}/job/{{ job_name_2 }}/lastBuild/api/json"
-        method: GET
-        user: "{{ jenkins_user }}"
-        password: "{{ jenkins_token }}"
-      register: job_2_result
-      until: job_2_result.json.result == "SUCCESS"
-      retries: 5
-      delay: 10
+Explanation of Key Sections:
 
-    - name: Set result D
-      set_fact:
-        D: "{{ job_2_result.json.result }}"
+1. Environment Variables:
 
-    - name: Schedule third Jenkins job with A, B, and D
-      at:
-        command: "curl -X POST {{ jenkins_url }}/job/{{ job_name_3 }}/buildWithParameters?A={{ A }}&B={{ B }}&D={{ D }} --user {{ jenkins_user }}:{{ jenkins_token }}"
-        time: "{{ change_date }}"
+NEXUS_DOWNLOAD_REPO_URL: The URL of the Nexus repository from which the .tar.gz file will be downloaded.
+
+NEXUS_UPLOAD_REPO_URL: The URL of the Nexus repository to which the file will be uploaded.
+
+NEXUS_USERNAME and NEXUS_PASSWORD: Use Jenkins' credentials binding to manage sensitive information securely.
+
+FILE_NAME: The name of the .tar.gz file to be downloaded.
+
+GROUP_ID, ARTIFACT_ID, VERSION: Maven artifact details to define the group, artifact, and version.
+
+
+
+2. Stage 1 - Download: This stage uses wget to download the .tar.gz file from Nexus with credentials.
+
+
+3. Stage 2 - Extract: After downloading, the .tar.gz file is extracted using tar.
+
+
+4. Stage 3 - Push to Nexus: This stage uses Maven's deploy:deploy-file to upload the .tar.gz file to a different Nexus repository.
+
+
+
+Adjustments:
+
+Maven: Ensure Maven is installed on the Jenkins agent.
+
+Credentials: Set up Nexus credentials (nexus-username and nexus-password) in Jenkins.
+
+Repository Details: Update repository URLs, group ID, artifact ID, and version details as per your Nexus setup.
+
+
+Let me know if you need further customization!
