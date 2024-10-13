@@ -1,38 +1,24 @@
 ---
-- name: Trigger Jenkins Job
+- name: Trigger Jenkins Job with Crumb using curl
   hosts: localhost
   tasks:
-    - name: Get CSRF crumb from Jenkins
-      uri:
-        url: "http://almlenkinsci-prod.systems.uk.hsbc/crumbIssuer/api/json"
-        method: GET
-        user: "GB-SVC-WREN"
-        password: "48DE-F7059F2C8"
-        force_basic_auth: yes
-        return_content: yes
-        status_code: 200
-      register: jenkins_crumb
+    - name: Get Jenkins crumb
+      shell: |
+        curl -H "Authorization: Bearer {{ jenkins_token }}" "http://{{ jenkins_url }}/crumbIssuer/api/json"
+      register: crumb_response
 
     - name: Extract crumb value
       set_fact:
-        crumb_value: "{{ jenkins_crumb.json.crumb }}"
-        crumb_field: "{{ jenkins_crumb.json.crumbRequestField }}"
+        crumb_value: "{{ crumb_response.stdout | from_json | json_query('crumb') }}"
+        crumb_field: "{{ crumb_response.stdout | from_json | json_query('crumbRequestField') }}"
 
-    - name: Trigger Jenkins Job
-      uri:
-        url: "http://almlenkinsci-prod.systems.uk.hsbc/job/<job-name>/buildWithParameters"
-        method: POST
-        user: "GB-SVC-WREN"
-        password: "48DE-F7059F2C8"
-        force_basic_auth: yes
-        headers:
-          "{{ crumb_field }}": "{{ crumb_value }}"
-        body_format: form-urlencoded
-        body:
-          param1: "value1"
-          param2: "value2"
+    - name: Trigger Jenkins job using curl
+      shell: |
+        curl -X POST "http://{{ jenkins_url }}/job/{{ job_name }}/buildWithParameters?param1={{ param1 }}&param2={{ param2 }}" \
+        -H "Authorization: Bearer {{ jenkins_token }}" \
+        -H "{{ crumb_field }}: {{ crumb_value }}"
       register: jenkins_response
 
-    - name: Display Jenkins Response
+    - name: Print Jenkins response
       debug:
-        var: jenkins_response
+        var: jenkins_response.stdout
