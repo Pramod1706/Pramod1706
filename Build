@@ -1,193 +1,85 @@
-Yes, you can create multiple change requests and deployments from a single Jira ticket. To achieve this, you would need to modify the workflow slightly. Here's how it can be done:
+Here's an Ansible playbook that accomplishes your request. This playbook will:
 
-Workflow Adaptation for Two Change Requests and Deployments
-
-1. Trigger Initial Jenkins Job to Create a Jira Ticket:
-
-The first step remains the same—create a Jira ticket.
+1. Check the status of a Jira ticket every 2 minutes.
 
 
+2. Stop after 4 hours if the ticket is not closed or done.
 
-2. Check the Status of the Jira Ticket Until Closed:
 
-Wait until the Jira ticket is closed, checking its status periodically.
+3. Save the ticket details once the ticket is closed.
 
 
 
-3. Once Closed, Create Two Change Requests:
+The playbook uses the Ansible until loop and a timeout to handle the 4-hour duration.
 
-Use the Jira ticket and change date/time to trigger the Jenkins job twice, once for each change request.
-
-Each change request can have its own set of parameters or be based on the same changeDatetime.
-
-
-
-4. Extract Change Request Numbers for Both:
-
-Retrieve and store the build outputs to capture both change request numbers.
-
-
-
-5. Schedule Two Deployments Based on the Change Requests:
-
-Use the two change request numbers and other parameters to trigger two separate Jenkins deployment jobs.
-
-Each deployment can be scheduled at its corresponding changeDatetime.
-
-
-
-
-Updated Ansible Playbook
+Playbook: check_jira_ticket.yml
 
 ---
-- name: Jenkins Workflow for Multiple Change Requests and Deployments
+- name: Check Jira Ticket Status
   hosts: localhost
+  gather_facts: no
   vars:
-    jenkins_url: "http://your-jenkins-url"
-    jenkins_user: "your-jenkins-username"
-    jenkins_token: "your-jenkins-api-token"
-    create_jira_job_name: "create-jira-job"
-    create_change_request_job_name: "create-change-request-job"
-    deploy_job_name: "deploy-job"
-    jira_base_url: "http://your-jira-url"
-    jira_user: "your-jira-username"
-    jira_token: "your-jira-api-token"
-    check_interval: 300  # Time in seconds (5 minutes)
+    jira_url: "https://your-domain.atlassian.net"
+    jira_user: "your-email@example.com"
+    jira_api_token: "your_api_token"
+    jira_issue_key: "ABC-123"
+    check_interval: 120  # seconds (2 minutes)
+    max_duration: 14400  # seconds (4 hours)
+    jira_status_closed: 
+      - "Closed"
+      - "Done"
 
   tasks:
-    - name: Trigger Jenkins job to create a Jira ticket using curl
-      shell: |
-        curl -X POST "{{ jenkins_url }}/job/{{ create_jira_job_name }}/buildWithParameters" \
-        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
-        --data-urlencode "PARAM1={{ PARAM1 }}" \
-        --data-urlencode "PARAM2={{ PARAM2 }}"
-      register: jenkins_jira_trigger_response
-      ignore_errors: yes
-
-    - name: Get Jira ticket number from the first Jenkins job output
-      shell: |
-        curl -s -u "{{ jenkins_user }}:{{ jenkins_token }}" \
-        "{{ jenkins_url }}/job/{{ create_jira_job_name }}/lastBuild/api/json"
-      register: jenkins_job_output
-      ignore_errors: yes
-
-    - name: Extract Jira ticket ID from job output
-      set_fact:
-        jira_ticket_id: "{{ jenkins_job_output.stdout | from_json | json_query('actions.parameters[?name==`JIRA_TICKET`].value') | first }}"  # Replace with actual key to get the ticket ID
-
-    - name: Check Jira ticket status every 5 minutes until it is closed
-      until: jira_status == "Closed"
-      retries: 50  # Will keep checking for up to ~4 hours
+    - name: Check Jira Ticket Status
+      uri:
+        url: "{{ jira_url }}/rest/api/2/issue/{{ jira_issue_key }}"
+        method: GET
+        user: "{{ jira_user }}"
+        password: "{{ jira_api_token }}"
+        force_basic_auth: yes
+        headers:
+          Content-Type: "application/json"
+        return_content: yes
+      register: jira_response
+      until: "{{ jira_response.json.fields.status.name in jira_status_closed }}"
+      retries: "{{ max_duration // check_interval }}"
       delay: "{{ check_interval }}"
-      shell: |
-        curl -s -u "{{ jira_user }}:{{ jira_token }}" \
-        "{{ jira_base_url }}/rest/api/2/issue/{{ jira_ticket_id }}"
-      register: jira_ticket_response
-      ignore_errors: yes
+      failed_when: false
 
-    - name: Set Jira status based on the API response
-      set_fact:
-        jira_status: "{{ jira_ticket_response.stdout | from_json | json_query('fields.status.name') }}"
+    - name: Stop playbook if ticket is not closed within 4 hours
+      when: jira_response.json.fields.status.name not in jira_status_closed
+      fail:
+        msg: "Jira ticket {{ jira_issue_key }} is still not closed after 4 hours. Stopping playbook."
 
-    - name: Extract change data (date and time) from Jira ticket response
-      set_fact:
-        change_datetime: "{{ jira_ticket_response.stdout | from_json | json_query('fields.customfield_change_date') }}"  # Replace with the actual field key from Jira
+    - name: Save Jira Ticket Details when closed
+      when: jira_response.json.fields.status.name in jira_status_closed
+      copy:
+        content: "{{ jira_response.json | to_nice_json }}"
+        dest: "/path/to/save/{{ jira_issue_key }}_details.json"
 
-    - name: Trigger first change request using Jira ticket and change date
-      shell: |
-        curl -X POST "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/buildWithParameters" \
-        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
-        --data-urlencode "JIRA_TICKET={{ jira_ticket_id }}" \
-        --data-urlencode "CHANGEDATETIME={{ change_datetime }}"
-      register: first_change_request_job_response
-      ignore_errors: yes
+Explanation
 
-    - name: Trigger second change request using Jira ticket and change date
-      shell: |
-        curl -X POST "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/buildWithParameters" \
-        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
-        --data-urlencode "JIRA_TICKET={{ jira_ticket_id }}" \
-        --data-urlencode "CHANGEDATETIME={{ change_datetime }}"
-      register: second_change_request_job_response
-      ignore_errors: yes
+1. Variables:
 
-    - name: Extract first change request number
-      shell: |
-        curl -s -u "{{ jenkins_user }}:{{ jenkins_token }}" \
-        "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/lastBuild/api/json"
-      register: first_change_request_output
-      ignore_errors: yes
+jira_url, jira_user, and jira_api_token hold your Jira credentials.
 
-    - name: Extract second change request number
-      shell: |
-        curl -s -u "{{ jenkins_user }}:{{ jenkins_token }}" \
-        "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/lastBuild/api/json"
-      register: second_change_request_output
-      ignore_errors: yes
+check_interval sets the retry interval (2 minutes).
 
-    - name: Set change request numbers
-      set_fact:
-        first_change_request_number: "{{ first_change_request_output.stdout | from_json | json_query('actions.parameters[?name==`CHANGE_REQUEST`].value') | first }}"
-        second_change_request_number: "{{ second_change_request_output.stdout | from_json | json_query('actions.parameters[?name==`CHANGE_REQUEST`].value') | first }}"
+max_duration sets the total wait time (4 hours).
 
-    - name: Schedule first deployment job
-      shell: |
-        curl -X POST "{{ jenkins_url }}/job/{{ deploy_job_name }}/buildWithParameters" \
-        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
-        --data-urlencode "PARAM1={{ PARAM1 }}" \
-        --data-urlencode "CHANGE_REQUEST={{ first_change_request_number }}" \
-        --data-urlencode "SCHEDULE_DATE={{ change_datetime }}"
-      ignore_errors: yes
-
-    - name: Schedule second deployment job
-      shell: |
-        curl -X POST "{{ jenkins_url }}/job/{{ deploy_job_name }}/buildWithParameters" \
-        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
-        --data-urlencode "PARAM1={{ PARAM1 }}" \
-        --data-urlencode "CHANGE_REQUEST={{ second_change_request_number }}" \
-        --data-urlencode "SCHEDULE_DATE={{ change_datetime }}"
-      ignore_errors: yes
-
-Explanation:
-
-1. Trigger Initial Jenkins Job to Create Jira Ticket:
-
-Same as before.
+jira_status_closed defines the status that signifies the ticket is closed.
 
 
 
-2. Wait Until Jira Ticket is Closed:
+2. Tasks:
 
-The playbook checks every 5 minutes until the Jira ticket status is "Closed."
+The Check Jira Ticket Status task sends a request to Jira and checks if the ticket status is in the jira_status_closed list. It retries every 2 minutes until the ticket is closed or the timeout is reached.
 
+The Stop playbook if ticket is not closed task ensures the playbook exits if the ticket remains open after 4 hours.
 
-
-3. Trigger Two Change Requests:
-
-After confirming the ticket is closed, it triggers the Jenkins job twice, once for each change request.
-
-Both use the same Jira ticket and changeDatetime.
-
-
-
-4. Extract Change Request Numbers:
-
-Each triggered job's output is fetched to extract and store the change request numbers.
-
-
-
-5. Schedule Two Deployments:
-
-Use the change request numbers and original parameters to schedule two deployment jobs.
-
-Each deployment is scheduled based on the provided changeDatetime.
+The Save Jira Ticket Details when closed task saves the ticket details as a JSON file once the ticket is closed.
 
 
 
 
-Notes:
-
-Adjust the playbook parameters as necessary.
-
-The logic can be further extended if each deployment or change request has different scheduling requirements.
-
+Ensure that the playbook is run on a machine that can access Jira, and replace placeholder values with actual credentials.
