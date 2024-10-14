@@ -1,5 +1,5 @@
 ---
-- name: Schedule a job in Ansible Tower
+- name: Schedule a job in Ansible Tower using curl
   hosts: localhost
   vars:
     ansible_prod_token: "{{ lookup('env', 'ANSIBLE_PROD_TOKEN') }}"
@@ -8,24 +8,19 @@
     template_id: "12345"  # Replace with your actual template ID
   tasks:
     - name: Schedule job in Ansible Tower
-      uri:
-        url: "https://ansible-tower.hc.cloud.uk.hsbc/api/v2/workflow_job_templates/{{ template_id }}/schedules/"
-        method: POST
-        headers:
-          Content-Type: "application/json"
-          Authorization: "Bearer {{ ansible_prod_token }}"
-        body: >
-          {
-            "rrule": "DTSTART;TZID=CAT:{{ schedule_date | regex_replace('[^0-9]', '') }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1",
-            "extra_data": {
-              "schedule_date": "{{ schedule_date }}"
-            }
+      shell: |
+        curl -X POST "https://ansible-tower.hc.cloud.uk.hsbc/api/v2/workflow_job_templates/{{ template_id }}/schedules/" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer {{ ansible_prod_token }}" \
+        --data '{
+          "rrule": "DTSTART;TZID=CAT:{{ schedule_date | regex_replace('[^0-9]', '') }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1",
+          "extra_data": {
+            "schedule_date": "{{ schedule_date }}"
           }
-        status_code: 201
-        validate_certs: yes
-        client_cert: "{{ ansible_tower_ssl_ca_cert }}"
+        }' \
+        --cacert "{{ ansible_tower_ssl_ca_cert }}"
       register: response
 
     - name: Show response
       debug:
-        var: response
+        var: response.stdout
