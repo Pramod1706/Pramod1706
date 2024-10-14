@@ -1,26 +1,31 @@
 ---
-- name: Check Jira ticket status
+- name: Schedule a job in Ansible Tower
   hosts: localhost
   vars:
-    jira_issue_key: "{{ lookup('file', '/tmp/jira_issue_key.txt') }}"
-    max_retries: 120  # 4 hours (120 * 2 minutes)
-    delay: 120  # 2 minutes
+    ansible_prod_token: "{{ lookup('env', 'ANSIBLE_PROD_TOKEN') }}"
+    ansible_tower_ssl_ca_cert: "{{ lookup('env', 'ANSIBLE_TOWER_SSL_CA_CERT') }}"
+    schedule_date: "2024-10-15T00:00:00Z"  # Example date, replace with actual value
+    template_id: "12345"  # Replace with your actual template ID
   tasks:
-    - name: Check Jira issue status
+    - name: Schedule job in Ansible Tower
       uri:
-        url: "https://your-jira-instance/rest/api/2/issue/{{ jira_issue_key }}"
-        method: GET
-        user: "{{ jira_username }}"
-        password: "{{ jira_password }}"
-        force_basic_auth: yes
+        url: "https://ansible-tower.hc.cloud.uk.hsbc/api/v2/workflow_job_templates/{{ template_id }}/schedules/"
+        method: POST
         headers:
           Content-Type: "application/json"
-        return_content: yes
-      register: jira_issue_details
-      until: jira_issue_details.json.fields.status.name == "Closed"
-      retries: "{{ max_retries }}"
-      delay: "{{ delay }}"
+          Authorization: "Bearer {{ ansible_prod_token }}"
+        body: >
+          {
+            "rrule": "DTSTART;TZID=CAT:{{ schedule_date | regex_replace('[^0-9]', '') }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1",
+            "extra_data": {
+              "schedule_date": "{{ schedule_date }}"
+            }
+          }
+        status_code: 201
+        validate_certs: yes
+        client_cert: "{{ ansible_tower_ssl_ca_cert }}"
+      register: response
 
-    - name: Show Jira issue details
+    - name: Show response
       debug:
-        var: jira_issue_details.json
+        var: response
