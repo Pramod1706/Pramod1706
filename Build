@@ -1,85 +1,26 @@
-Here's an Ansible playbook that accomplishes your request. This playbook will:
-
-1. Check the status of a Jira ticket every 2 minutes.
-
-
-2. Stop after 4 hours if the ticket is not closed or done.
-
-
-3. Save the ticket details once the ticket is closed.
-
-
-
-The playbook uses the Ansible until loop and a timeout to handle the 4-hour duration.
-
-Playbook: check_jira_ticket.yml
-
 ---
-- name: Check Jira Ticket Status
+- name: Check Jira ticket status
   hosts: localhost
-  gather_facts: no
   vars:
-    jira_url: "https://your-domain.atlassian.net"
-    jira_user: "your-email@example.com"
-    jira_api_token: "your_api_token"
-    jira_issue_key: "ABC-123"
-    check_interval: 120  # seconds (2 minutes)
-    max_duration: 14400  # seconds (4 hours)
-    jira_status_closed: 
-      - "Closed"
-      - "Done"
-
+    jira_issue_key: "{{ lookup('file', '/tmp/jira_issue_key.txt') }}"
+    max_retries: 120  # 4 hours (120 * 2 minutes)
+    delay: 120  # 2 minutes
   tasks:
-    - name: Check Jira Ticket Status
+    - name: Check Jira issue status
       uri:
-        url: "{{ jira_url }}/rest/api/2/issue/{{ jira_issue_key }}"
+        url: "https://your-jira-instance/rest/api/2/issue/{{ jira_issue_key }}"
         method: GET
-        user: "{{ jira_user }}"
-        password: "{{ jira_api_token }}"
+        user: "{{ jira_username }}"
+        password: "{{ jira_password }}"
         force_basic_auth: yes
         headers:
           Content-Type: "application/json"
         return_content: yes
-      register: jira_response
-      until: "{{ jira_response.json.fields.status.name in jira_status_closed }}"
-      retries: "{{ max_duration // check_interval }}"
-      delay: "{{ check_interval }}"
-      failed_when: false
+      register: jira_issue_details
+      until: jira_issue_details.json.fields.status.name == "Closed"
+      retries: "{{ max_retries }}"
+      delay: "{{ delay }}"
 
-    - name: Stop playbook if ticket is not closed within 4 hours
-      when: jira_response.json.fields.status.name not in jira_status_closed
-      fail:
-        msg: "Jira ticket {{ jira_issue_key }} is still not closed after 4 hours. Stopping playbook."
-
-    - name: Save Jira Ticket Details when closed
-      when: jira_response.json.fields.status.name in jira_status_closed
-      copy:
-        content: "{{ jira_response.json | to_nice_json }}"
-        dest: "/path/to/save/{{ jira_issue_key }}_details.json"
-
-Explanation
-
-1. Variables:
-
-jira_url, jira_user, and jira_api_token hold your Jira credentials.
-
-check_interval sets the retry interval (2 minutes).
-
-max_duration sets the total wait time (4 hours).
-
-jira_status_closed defines the status that signifies the ticket is closed.
-
-
-
-2. Tasks:
-
-The Check Jira Ticket Status task sends a request to Jira and checks if the ticket status is in the jira_status_closed list. It retries every 2 minutes until the ticket is closed or the timeout is reached.
-
-The Stop playbook if ticket is not closed task ensures the playbook exits if the ticket remains open after 4 hours.
-
-The Save Jira Ticket Details when closed task saves the ticket details as a JSON file once the ticket is closed.
-
-
-
-
-Ensure that the playbook is run on a machine that can access Jira, and replace placeholder values with actual credentials.
+    - name: Show Jira issue details
+      debug:
+        var: jira_issue_details.json
