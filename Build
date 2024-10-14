@@ -2,23 +2,22 @@
 - name: Schedule a job in Ansible Tower using curl
   hosts: localhost
   vars:
-    ansible_prod_token: "{{ lookup('env', 'ANSIBLE_PROD_TOKEN') }}"
-    ansible_tower_ssl_ca_cert: "{{ lookup('env', 'ANSIBLE_TOWER_SSL_CA_CERT') }}"
-    schedule_date: "2024-10-15T00:00:00Z"  # Example date, replace with actual value
-    template_id: "12345"  # Replace with your actual template ID
+    custom_username: "your_username"  # Replace with your actual username
+    custom_password: "your_password"  # Replace with your actual password
+    schedule_start_date_time: "2024-10-15T00:00:00Z"  # Example date, replace with actual value
+    template_id: "150938"  # Replace with your actual template ID
   tasks:
     - name: Schedule job in Ansible Tower
       shell: |
-        curl -X POST "https://ansible-tower.hc.cloud.uk.hsbc/api/v2/workflow_job_templates/{{ template_id }}/schedules/" \
+        curl -X POST -u "{{ custom_username }}:{{ custom_password }}" \
+        "https://ansible-tower.hc.cloud.uk.hsbc/api/v2/workflow_job_templates/{{ template_id }}/schedules/" \
         -H "Content-Type: application/json" \
-        -H "Authorization: Bearer {{ ansible_prod_token }}" \
         --data '{
-          "rrule": "DTSTART;TZID=CAT:{{ schedule_date | regex_replace('[^0-9]', '') }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1",
+          "rrule": "DTSTART;TZID=CAT:{{ schedule_start_date_time | regex_replace('[^0-9]', '') }} RRULE:FREQ=MINUTELY;INTERVAL=1;COUNT=1",
           "extra_data": {
-            "schedule_date": "{{ schedule_date }}"
+            "schedule_start_date_time": "{{ schedule_start_date_time }}"
           }
-        }' \
-        --cacert "{{ ansible_tower_ssl_ca_cert }}"
+        }'
       register: response
 
     - name: Show response
