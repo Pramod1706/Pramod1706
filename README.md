@@ -1,24 +1,33 @@
 ---
-- name: Trigger Jenkins Job with Crumb using curl
+- name: Create a Jira ticket
   hosts: localhost
   tasks:
-    - name: Get Jenkins crumb
-      shell: |
-        curl -H "Authorization: Bearer {{ jenkins_token }}" "http://{{ jenkins_url }}/crumbIssuer/api/json"
-      register: crumb_response
+    - name: Create a Jira issue
+      uri:
+        url: "https://your-jira-instance/rest/api/2/issue"
+        method: POST
+        user: "{{ jira_username }}"
+        password: "{{ jira_password }}"
+        force_basic_auth: yes
+        headers:
+          Content-Type: "application/json"
+        body: >
+          {
+            "fields": {
+              "project": {
+                "key": "{{ jira_project_key }}"
+              },
+              "summary": "{{ jira_summary }}",
+              "description": "{{ jira_description }}",
+              "issuetype": {
+                "name": "{{ jira_issue_type }}"
+              }
+            }
+          }
+        status_code: 201
+        return_content: yes
+      register: jira_response
 
-    - name: Extract crumb value
-      set_fact:
-        crumb_value: "{{ crumb_response.stdout | from_json | json_query('crumb') }}"
-        crumb_field: "{{ crumb_response.stdout | from_json | json_query('crumbRequestField') }}"
-
-    - name: Trigger Jenkins job using curl
-      shell: |
-        curl -X POST "http://{{ jenkins_url }}/job/{{ job_name }}/buildWithParameters?param1={{ param1 }}&param2={{ param2 }}" \
-        -H "Authorization: Bearer {{ jenkins_token }}" \
-        -H "{{ crumb_field }}: {{ crumb_value }}"
-      register: jenkins_response
-
-    - name: Print Jenkins response
+    - name: Show the response
       debug:
-        var: jenkins_response.stdout
+        var: jira_response.json
