@@ -1,69 +1,193 @@
-Absolutely, I can provide a more detailed Build and Deployment document. Here’s an expanded version that includes specific steps and considerations:
+Yes, you can create multiple change requests and deployments from a single Jira ticket. To achieve this, you would need to modify the workflow slightly. Here's how it can be done:
 
-Detailed Build and Deployment Document
-Introduction
-This document is a comprehensive guide for the build and deployment process of the [Application Name]. It is intended for use by the DevOps team to ensure a consistent and reliable pipeline.
+Workflow Adaptation for Two Change Requests and Deployments
 
-Revision History
-Table
+1. Trigger Initial Jenkins Job to Create a Jira Ticket:
 
-Date	Version	Description	Author
-[Date]	1.0	Detailed documentation	[Your Name]
-Table of Contents
-Introduction
-Revision History
-Table of Contents
-Build Environment Setup
-Deployment Environment Setup
-Detailed Build Process
-Detailed Deployment Process
-Verification and Validation
-Rollback and Recovery Plan
-Security and Compliance
-Monitoring and Logging
-Troubleshooting Guide
-Appendix
-Build Environment Setup
-Source Control: Configure access to the Git repository at [Git repository URL].
-Build Server: Set up a build server using [Jenkins/CircleCI/GitHub Actions/etc.].
-Build Tools: Install and configure build tools such as [Maven/Gradle/npm/etc.].
-Artifact Repository: Establish an artifact repository using [Nexus/Artifactory/etc.] for versioning and storing build artifacts.
-Deployment Environment Setup
-Infrastructure Provisioning: Automate the provisioning of servers using tools like Terraform or AWS CloudFormation.
-Configuration Management: Use Ansible, Chef, or Puppet for configuration management to maintain consistency across environments.
-Middleware Setup: Install and configure necessary middleware, including web servers, database servers, etc.
-Network Configuration: Set up load balancers, firewalls, and other network components to ensure secure and balanced traffic distribution.
-Detailed Build Process
-Code Checkout: Automate the checkout of the latest code from the main branch using build server hooks.
-Dependency Resolution: Implement a dependency management process to install required libraries and frameworks.
-Compilation: Compile the source code into binary artifacts, ensuring error handling for compilation failures.
-Automated Testing: Integrate automated unit and integration tests within the build process to ensure code quality.
-Artifact Packaging: Package the compiled binaries into deployable formats like WAR, JAR, or Docker images.
-Artifact Promotion: Promote the build artifacts through different stages (dev, test, prod) with proper version tagging.
-Detailed Deployment Process
-Environment Validation: Perform pre-deployment checks to validate the health and readiness of the target environment.
-Downtime Management: Communicate planned downtime to stakeholders and prepare for service unavailability if necessary.
-Artifact Deployment: Retrieve the specific versioned artifact from the repository and deploy it using CI/CD pipelines.
-Database Migration: Execute any required database migrations or schema changes in coordination with the deployment.
-Service Restart: Restart services or applications as needed to apply new configurations and changes.
-Smoke Testing: Conduct smoke tests to ensure basic functionality works as expected post-deployment.
-Verification and Validation
-Health Checks: Implement automated health checks to verify system stability and operational status.
-Performance Testing: Conduct performance testing to ensure the application meets the required benchmarks.
-Rollback and Recovery Plan
-Automated Rollback: Set up automated rollback mechanisms to revert to the previous stable version in case of a failed deployment.
-Data Recovery: Ensure data backup procedures are in place and tested regularly for quick recovery in case of data loss.
-Security and Compliance
-Access Control: Enforce strict access controls to both build and deployment environments.
-Secrets Management: Securely manage secrets and credentials using tools like HashiCorp Vault or AWS Secrets Manager.
-Compliance Audits: Regularly perform compliance audits to adhere to industry standards and regulations.
-Monitoring and Logging
-Real-time Monitoring: Utilize tools like Prometheus, Grafana, or New Relic for real-time application and infrastructure monitoring.
-Log Aggregation: Aggregate logs using solutions like ELK Stack or Splunk for centralized logging and analysis.
-Troubleshooting Guide
-Issue Tracking: Document common deployment issues and their resolutions in a knowledge base.
-Log Analysis: Provide guidelines for analyzing logs to troubleshoot and identify root causes of issues.
-Appendix
-Scripts and Commands: Include detailed build and deployment scripts or commands used throughout the process.
-Configuration Samples: Attach sample configuration files and templates for reference.
-Please ensure to replace placeholders with actual values and details specific to your application and infrastructure. This document should be reviewed and updated regularly to reflect any changes in the build and deployment process. 🛠️🚢
+The first step remains the same—create a Jira ticket.
+
+
+
+2. Check the Status of the Jira Ticket Until Closed:
+
+Wait until the Jira ticket is closed, checking its status periodically.
+
+
+
+3. Once Closed, Create Two Change Requests:
+
+Use the Jira ticket and change date/time to trigger the Jenkins job twice, once for each change request.
+
+Each change request can have its own set of parameters or be based on the same changeDatetime.
+
+
+
+4. Extract Change Request Numbers for Both:
+
+Retrieve and store the build outputs to capture both change request numbers.
+
+
+
+5. Schedule Two Deployments Based on the Change Requests:
+
+Use the two change request numbers and other parameters to trigger two separate Jenkins deployment jobs.
+
+Each deployment can be scheduled at its corresponding changeDatetime.
+
+
+
+
+Updated Ansible Playbook
+
+---
+- name: Jenkins Workflow for Multiple Change Requests and Deployments
+  hosts: localhost
+  vars:
+    jenkins_url: "http://your-jenkins-url"
+    jenkins_user: "your-jenkins-username"
+    jenkins_token: "your-jenkins-api-token"
+    create_jira_job_name: "create-jira-job"
+    create_change_request_job_name: "create-change-request-job"
+    deploy_job_name: "deploy-job"
+    jira_base_url: "http://your-jira-url"
+    jira_user: "your-jira-username"
+    jira_token: "your-jira-api-token"
+    check_interval: 300  # Time in seconds (5 minutes)
+
+  tasks:
+    - name: Trigger Jenkins job to create a Jira ticket using curl
+      shell: |
+        curl -X POST "{{ jenkins_url }}/job/{{ create_jira_job_name }}/buildWithParameters" \
+        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
+        --data-urlencode "PARAM1={{ PARAM1 }}" \
+        --data-urlencode "PARAM2={{ PARAM2 }}"
+      register: jenkins_jira_trigger_response
+      ignore_errors: yes
+
+    - name: Get Jira ticket number from the first Jenkins job output
+      shell: |
+        curl -s -u "{{ jenkins_user }}:{{ jenkins_token }}" \
+        "{{ jenkins_url }}/job/{{ create_jira_job_name }}/lastBuild/api/json"
+      register: jenkins_job_output
+      ignore_errors: yes
+
+    - name: Extract Jira ticket ID from job output
+      set_fact:
+        jira_ticket_id: "{{ jenkins_job_output.stdout | from_json | json_query('actions.parameters[?name==`JIRA_TICKET`].value') | first }}"  # Replace with actual key to get the ticket ID
+
+    - name: Check Jira ticket status every 5 minutes until it is closed
+      until: jira_status == "Closed"
+      retries: 50  # Will keep checking for up to ~4 hours
+      delay: "{{ check_interval }}"
+      shell: |
+        curl -s -u "{{ jira_user }}:{{ jira_token }}" \
+        "{{ jira_base_url }}/rest/api/2/issue/{{ jira_ticket_id }}"
+      register: jira_ticket_response
+      ignore_errors: yes
+
+    - name: Set Jira status based on the API response
+      set_fact:
+        jira_status: "{{ jira_ticket_response.stdout | from_json | json_query('fields.status.name') }}"
+
+    - name: Extract change data (date and time) from Jira ticket response
+      set_fact:
+        change_datetime: "{{ jira_ticket_response.stdout | from_json | json_query('fields.customfield_change_date') }}"  # Replace with the actual field key from Jira
+
+    - name: Trigger first change request using Jira ticket and change date
+      shell: |
+        curl -X POST "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/buildWithParameters" \
+        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
+        --data-urlencode "JIRA_TICKET={{ jira_ticket_id }}" \
+        --data-urlencode "CHANGEDATETIME={{ change_datetime }}"
+      register: first_change_request_job_response
+      ignore_errors: yes
+
+    - name: Trigger second change request using Jira ticket and change date
+      shell: |
+        curl -X POST "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/buildWithParameters" \
+        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
+        --data-urlencode "JIRA_TICKET={{ jira_ticket_id }}" \
+        --data-urlencode "CHANGEDATETIME={{ change_datetime }}"
+      register: second_change_request_job_response
+      ignore_errors: yes
+
+    - name: Extract first change request number
+      shell: |
+        curl -s -u "{{ jenkins_user }}:{{ jenkins_token }}" \
+        "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/lastBuild/api/json"
+      register: first_change_request_output
+      ignore_errors: yes
+
+    - name: Extract second change request number
+      shell: |
+        curl -s -u "{{ jenkins_user }}:{{ jenkins_token }}" \
+        "{{ jenkins_url }}/job/{{ create_change_request_job_name }}/lastBuild/api/json"
+      register: second_change_request_output
+      ignore_errors: yes
+
+    - name: Set change request numbers
+      set_fact:
+        first_change_request_number: "{{ first_change_request_output.stdout | from_json | json_query('actions.parameters[?name==`CHANGE_REQUEST`].value') | first }}"
+        second_change_request_number: "{{ second_change_request_output.stdout | from_json | json_query('actions.parameters[?name==`CHANGE_REQUEST`].value') | first }}"
+
+    - name: Schedule first deployment job
+      shell: |
+        curl -X POST "{{ jenkins_url }}/job/{{ deploy_job_name }}/buildWithParameters" \
+        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
+        --data-urlencode "PARAM1={{ PARAM1 }}" \
+        --data-urlencode "CHANGE_REQUEST={{ first_change_request_number }}" \
+        --data-urlencode "SCHEDULE_DATE={{ change_datetime }}"
+      ignore_errors: yes
+
+    - name: Schedule second deployment job
+      shell: |
+        curl -X POST "{{ jenkins_url }}/job/{{ deploy_job_name }}/buildWithParameters" \
+        --user "{{ jenkins_user }}:{{ jenkins_token }}" \
+        --data-urlencode "PARAM1={{ PARAM1 }}" \
+        --data-urlencode "CHANGE_REQUEST={{ second_change_request_number }}" \
+        --data-urlencode "SCHEDULE_DATE={{ change_datetime }}"
+      ignore_errors: yes
+
+Explanation:
+
+1. Trigger Initial Jenkins Job to Create Jira Ticket:
+
+Same as before.
+
+
+
+2. Wait Until Jira Ticket is Closed:
+
+The playbook checks every 5 minutes until the Jira ticket status is "Closed."
+
+
+
+3. Trigger Two Change Requests:
+
+After confirming the ticket is closed, it triggers the Jenkins job twice, once for each change request.
+
+Both use the same Jira ticket and changeDatetime.
+
+
+
+4. Extract Change Request Numbers:
+
+Each triggered job's output is fetched to extract and store the change request numbers.
+
+
+
+5. Schedule Two Deployments:
+
+Use the change request numbers and original parameters to schedule two deployment jobs.
+
+Each deployment is scheduled based on the provided changeDatetime.
+
+
+
+
+Notes:
+
+Adjust the playbook parameters as necessary.
+
+The logic can be further extended if each deployment or change request has different scheduling requirements.
+
