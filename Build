@@ -6,7 +6,7 @@
   tasks:
     - name: Manually format the schedule start date
       set_fact:
-        formatted_date: "{{ scheduleStartDateTime.replace('-', '').replace(':', '').replace('T', '') }}Z"
+        formatted_date: "{{ scheduleStartDateTime.split('T')[0] | replace('-', '') }}T{{ scheduleStartDateTime.split('T')[1] | replace(':', '') }}Z"
 
     - name: Print formatted date
       debug:
