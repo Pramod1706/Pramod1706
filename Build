@@ -1,23 +1,13 @@
 ---
-- name: Schedule a job in Ansible Tower using curl
+- name: Convert user input date to required format
   hosts: localhost
+  vars_prompt:
+    - name: "user_date"
+      prompt: "Enter the date (e.g., 2025-10-23T11:45:00)"
+      private: no
   vars:
-    scheduleStartDateTime: "{{ scheduleStartDateTime }}"  # Example date, replace with actual value
-    template_id: "150068"  # Replace with your actual template ID
-    custom_username: "your_username"  # Replace with your actual username
-    custom_password: "your_password"  # Replace with your actual password
+    formatted_date: "{{ user_date | to_datetime('%Y-%m-%dT%H:%M:%S') | strftime('%Y%m%dT%H%M%SZ') }}"
   tasks:
-    - name: Schedule job in Ansible Tower
-      shell: |
-        curl -X POST -u "{{ custom_username }}:{{ custom_password }}" \
-        "https://alm-aapuat-sdc.hc.cloud.uk.hsbc/api/v2/job_templates/{{ template_id }}/schedules/" \
-        -H "Content-Type: application/json" \
-        -d '{
-              "name": "test sch",
-              "rrule": "DTSTART:{{ scheduleStartDateTime }}\\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
-            }'
-      register: response
-
-    - name: Show response
+    - name: Print formatted date
       debug:
-        var: response.stdout
+        msg: "Formatted Date: {{ formatted_date }}"
