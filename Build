@@ -2,19 +2,24 @@
 - name: Schedule a job in Ansible Tower using curl
   hosts: localhost
   vars:
-    scheduleStartDateTime: "20241015T100000Z"  # Replace with the required date in the correct format
-    template_id: "150068"  # Replace with your actual template ID
-    custom_username: "your_username"  # Replace with your actual username
-    custom_password: "your_password"  # Replace with your actual password
+    scheduleStartDateTime: "2025-10-23T11:45:00"  # Example date, replace with actual value
   tasks:
+    - name: Manually format the schedule start date
+      set_fact:
+        formatted_date: "{{ scheduleStartDateTime.split('T')[0] | replace('-', '') }}T{{ scheduleStartDateTime.split('T')[1] | replace(':', '') }}Z"
+
+    - name: Print formatted date
+      debug:
+        msg: "Formatted Date: {{ formatted_date }}"
+
     - name: Schedule job in Ansible Tower
       shell: |
-        curl -X POST -u "{{ custom_username }}:{{ custom_password }}" \
-        "https://alm-aapuat-sdc.hc.cloud.uk.hsbc/api/v2/job_templates/{{ template_id }}/schedules/" \
+        curl -X POST -u "your_username:your_password" \
+        "https://alm-aapuat-sdc.hc.cloud.uk.hsbc/api/v2/job_templates/150068/schedules/" \
         -H "Content-Type: application/json" \
         -d '{
               "name": "test sch",
-              "rrule": "DTSTART:{{ scheduleStartDateTime }}\\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
+              "rrule": "DTSTART:{{ formatted_date }}\\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
             }'
       register: response
 
