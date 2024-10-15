@@ -4,6 +4,14 @@
   vars:
     scheduleStartDateTime: "2025-10-23T11:45:00"  # Example date, replace with actual value
   tasks:
+    - name: Manually format the schedule start date
+      set_fact:
+        formatted_date: "{{ scheduleStartDateTime.replace('-', '').replace(':', '').replace('T', '') }}Z"
+
+    - name: Print formatted date
+      debug:
+        msg: "Formatted Date: {{ formatted_date }}"
+
     - name: Schedule job in Ansible Tower
       shell: |
         curl -X POST -u "your_username:your_password" \
@@ -11,7 +19,7 @@
         -H "Content-Type: application/json" \
         -d '{
               "name": "test sch",
-              "rrule": "DTSTART:{{ scheduleStartDateTime | to_datetime('%Y-%m-%dT%H:%M:%S') | strftime('%Y%m%dT%H%M%SZ') }}\\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
+              "rrule": "DTSTART:{{ formatted_date }}\\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
             }'
       register: response
 
