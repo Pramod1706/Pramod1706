@@ -12,6 +12,13 @@
       debug:
         msg: "Formatted Date: {{ formatted_date }}"
 
+    - name: Validate formatted date
+      assert:
+        that:
+          - formatted_date is not none
+          - formatted_date | length == 16
+        fail_msg: "Formatted date is incorrect: {{ formatted_date }}"
+
     - name: Schedule job in Ansible Tower
       shell: |
         curl -X POST -u "your_username:your_password" \
