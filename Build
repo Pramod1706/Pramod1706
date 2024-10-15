@@ -1,12 +1,16 @@
+You're right. We need to ensure that only the characters - and : are removed, and the T should remain in its place. Here's the corrected playbook:
+
+Corrected Ansible Playbook (Manual Formatting):
+
 ---
-- name: Schedule a job in Ansible Tower using curl
+- name: Manually Convert and Schedule a Job in Ansible Tower
   hosts: localhost
   vars:
     scheduleStartDateTime: "2025-10-23T11:45:00"  # Example date, replace with actual value
   tasks:
     - name: Manually format the schedule start date
       set_fact:
-        formatted_date: "{{ scheduleStartDateTime.split('T')[0] | replace('-', '') }}T{{ scheduleStartDateTime.split('T')[1] | replace(':', '') }}Z"
+        formatted_date: "{{ scheduleStartDateTime.replace('-', '') | replace(':', '') | replace('T', 'T') }}Z"
 
     - name: Print formatted date
       debug:
@@ -26,3 +30,32 @@
     - name: Show response
       debug:
         var: response.stdout
+
+Explanation:
+
+1. Date Formatting:
+
+The replace method removes only - and : while leaving T in its place.
+
+Example: "2025-10-23T11:45:00" is converted to "20251023T114500Z".
+
+
+
+2. Example Conversion:
+
+Input: "2025-10-23T11:45:00"
+
+Output: "20251023T114500Z"
+
+
+
+3. CURL Command:
+
+Update with your actual username and password for authentication.
+
+Use the formatted_date in the rrule to correctly schedule the job.
+
+
+
+
+This should now correctly handle your requirements
