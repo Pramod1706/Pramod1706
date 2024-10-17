@@ -1,3 +1,18 @@
+If the curl command and Postman are working, but the Ansible playbook using the uri module is not, it suggests that there might be some subtle differences in how the requests are being made. Let’s troubleshoot and refine the Ansible playbook further.
+
+Troubleshooting Steps
+
+1. Check the Ansible Version: Ensure you are using a recent version of Ansible, as there could be improvements or bug fixes in the uri module.
+
+
+2. Modify the uri Task for Debugging: Let's modify the uri task to include more debug information to see exactly what is being sent and received.
+
+
+
+Updated Ansible Playbook
+
+Here’s a revised playbook with additional debug statements to capture the details:
+
 ---
 - name: Retrieve and print Jira ticket details using the uri module
   hosts: localhost
@@ -14,7 +29,13 @@
           Content-Type: "application/json"
           Accept: "application/json"
       register: jira_response
-      no_log: true
+      no_log: false  # Set to false for debugging
+
+    - name: Display HTTP response
+      debug:
+        msg:
+          - "HTTP Status: {{ jira_response.status }}"
+          - "Response Body: {{ jira_response.content | default('No content') }}"
 
     - name: Check if the request was successful
       fail:
@@ -28,3 +49,30 @@
     - name: Print the Jira ticket status
       debug:
         msg: "The status of the Jira ticket is: {{ jira_data.fields.status.name }}"
+
+Key Changes:
+
+1. no_log: false: Temporarily set to false to see all output, including sensitive data like the HTTP response. Make sure to set this back to true or no_log: true after debugging.
+
+
+2. Display HTTP response: Added a task to show the HTTP status and response body. This will help you see what Ansible is receiving from the API.
+
+
+
+Running the Playbook:
+
+Run the playbook again and observe the output. This should help identify any discrepancies between the successful curl command and the Ansible request.
+
+ansible-playbook get_jira_ticket_uri.yml -e "jira_username=your-username jira_api_token=your-api-token ticket_id=TICKET-123"
+
+Analyze the Output:
+
+Check if the HTTP status is 200.
+
+Review the response body to see if it’s valid JSON or if there are any error messages from Jira.
+
+
+Next Steps:
+
+If you still encounter issues, please share the output from the playbook, particularly the HTTP status and response body. This information will be crucial in diagnosing the problem.
+
