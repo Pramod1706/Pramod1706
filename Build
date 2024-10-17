@@ -1,28 +1,19 @@
 ---
-- name: Manually Convert and Schedule a Job in Ansible Tower
+- name: Retrieve and print Jira ticket details
   hosts: localhost
-  vars:
-    scheduleStartDateTime: "2025-10-23T11:45:00"  # Example date, replace with actual value
   tasks:
-    - name: Manually format the schedule start date
-      set_fact:
-        formatted_date: "{{ scheduleStartDateTime | regex_replace('-', '') | regex_replace(':', '') | regex_replace('T', '') + 'Z' }}"
-
-    - name: Print formatted date
-      debug:
-        msg: "Formatted Date: {{ formatted_date }}"
-
-    - name: Schedule job in Ansible Tower
+    - name: Get Jira ticket details using curl
       shell: |
-        curl -X POST -u "your_username:your_password" \
-        "https://alm-aapuat-sdc.hc.cloud.uk.hsbc/api/v2/job_templates/150068/schedules/" \
-        -H "Content-Type: application/json" \
-        -d '{
-              "name": "test sch",
-              "rrule": "DTSTART:{{ formatted_date }}\\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=1"
-            }'
-      register: response
+        curl -u {{ jira_username }}:{{ jira_api_token }} \
+             -H "Content-Type: application/json" \
+             -X GET "https://your-jira-instance.atlassian.net/rest/api/2/issue/{{ ticket_id }}"
+      register: curl_output
+      no_log: true
 
-    - name: Show response
+    - name: Parse the JSON response from Jira
+      set_fact:
+        jira_data: "{{ curl_output.stdout | from_json }}"
+
+    - name: Print the Jira ticket status
       debug:
-        var: response.stdout
+        msg: "The status of the Jira ticket is: {{ jira_data.fields.status.name }}"
