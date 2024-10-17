@@ -1,18 +1,29 @@
 ---
-- name: Retrieve and print Jira ticket details
+- name: Retrieve and print Jira ticket details using the uri module
   hosts: localhost
   tasks:
-    - name: Get Jira ticket details using curl
-      shell: |
-        curl -u {{ jira_username }}:{{ jira_api_token }} \
-             -H "Content-Type: application/json" \
-             -X GET "https://your-jira-instance.atlassian.net/rest/api/2/issue/{{ ticket_id }}"
-      register: curl_output
+    - name: Get Jira ticket details
+      uri:
+        url: "https://your-jira-instance.atlassian.net/rest/api/2/issue/{{ ticket_id }}"
+        method: GET
+        user: "{{ jira_username }}"
+        password: "{{ jira_api_token }}"
+        force_basic_auth: yes
+        return_content: yes
+        headers:
+          Content-Type: "application/json"
+          Accept: "application/json"
+      register: jira_response
       no_log: true
+
+    - name: Check if the request was successful
+      fail:
+        msg: "Failed to retrieve Jira ticket details. HTTP status code: {{ jira_response.status }}"
+      when: jira_response.status != 200
 
     - name: Parse the JSON response from Jira
       set_fact:
-        jira_data: "{{ curl_output.stdout | from_json }}"
+        jira_data: "{{ jira_response.json }}"
 
     - name: Print the Jira ticket status
       debug:
