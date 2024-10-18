@@ -1,18 +1,18 @@
-The error indicates that the Groovy sandbox is blocking the use of the Duration.between() method, which is a static method and hence not permitted within the sandbox environment.
+To trigger Job 2 using the Jenkins REST API with a delay, you can modify the script to use the httpRequest step, which allows you to send HTTP requests directly from the Jenkins pipeline. Here’s how you can do it:
 
-To work around this issue without disabling the sandbox, you can avoid using Duration.between() and manually calculate the difference in seconds using ChronoUnit.SECONDS. Here's the updated script:
-
-Updated Job 1 Jenkinsfile:
-
-import java.time.LocalDateTime
-import java.time.format.DateTimeFormatter
-import java.time.temporal.ChronoUnit
+Job 1 Jenkinsfile:
 
 pipeline {
     agent any
     parameters {
         string(name: 'TRIGGER_DATE', defaultValue: '2024-10-19', description: 'Date to trigger Job 2 (format: YYYY-MM-DD)')
         string(name: 'TRIGGER_TIME', defaultValue: '15:30', description: 'Time to trigger Job 2 (24-hour format: HH:mm)')
+    }
+    environment {
+        JENKINS_URL = 'http://<JENKINS_SERVER_URL>' // Replace with your Jenkins server URL
+        JOB_NAME = 'Job2' // Replace with your Job 2 name
+        USERNAME = '<YOUR_JENKINS_USERNAME>'
+        API_TOKEN = '<YOUR_JENKINS_API_TOKEN>'
     }
     stages {
         stage('Schedule Job 2') {
@@ -22,23 +22,32 @@ pipeline {
                     def triggerDate = params.TRIGGER_DATE
                     def triggerTime = params.TRIGGER_TIME
 
-                    // Parse the desired time using LocalDateTime
-                    def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-                    def triggerDateTime = LocalDateTime.parse("${triggerDate} ${triggerTime}", formatter)
-                    def currentTime = LocalDateTime.now()
+                    // Parse the desired trigger date and time
+                    def formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                    def triggerDateTime = java.time.LocalDateTime.parse("${triggerDate} ${triggerTime}", formatter)
 
-                    // Calculate the delay in seconds using ChronoUnit.SECONDS.between
-                    def delayInSeconds = ChronoUnit.SECONDS.between(currentTime, triggerDateTime)
+                    // Get the current date and time
+                    def currentTime = java.time.LocalDateTime.now()
+
+                    // Calculate the difference in seconds
+                    def delayInSeconds = java.time.temporal.ChronoUnit.SECONDS.between(currentTime, triggerDateTime)
 
                     if (delayInSeconds > 0) {
-                        echo "Waiting for ${delayInSeconds} seconds to trigger Job 2 at ${triggerDateTime}."
-                        sleep time: delayInSeconds, unit: 'SECONDS'
-                    } else {
-                        echo "The specified time has already passed. Triggering Job 2 immediately."
-                    }
+                        echo "Current time is: ${currentTime}"
+                        echo "Trigger time is: ${triggerDateTime}"
+                        echo "Scheduling Job 2 with a delay of ${delayInSeconds} seconds."
 
-                    // Trigger Job 2
-                    build job: 'Job2'
+                        // Trigger Job 2 via Jenkins REST API
+                        def response = httpRequest(
+                            httpMode: 'POST',
+                            url: "${env.JENKINS_URL}/job/${env.JOB_NAME}/buildWithParameters?delay=${delayInSeconds}sec",
+                            authentication: 'jenkins-credentials' // Make sure this matches a Jenkins credential ID
+                        )
+
+                        echo "Job 2 triggered with status: ${response.status}"
+                    } else {
+                        echo "The specified time (${triggerDateTime}) has already passed. Unable to schedule Job 2."
+                    }
                 }
             }
         }
@@ -47,9 +56,38 @@ pipeline {
 
 Explanation:
 
-The updated script uses ChronoUnit.SECONDS.between to calculate the delay, which should be more sandbox-friendly than Duration.between().
+1. Parameters:
 
-This avoids using restricted static methods and relies on safer operations permitted within the Groovy sandbox.
+The pipeline accepts TRIGGER_DATE and TRIGGER_TIME as inputs.
 
 
-Try this revised script, and it should bypass the sandbox restrictions while still achieving the desired scheduling.
+
+2. Jenkins REST API Call:
+
+The script calculates the delay between the current time and the input time.
+
+It then sends a POST request to the Jenkins REST API endpoint for Job 2 using httpRequest.
+
+The delay parameter in the URL specifies how many seconds Jenkins should wait before triggering Job 2.
+
+
+
+3. Environment Variables:
+
+Replace <JENKINS_SERVER_URL>, <YOUR_JENKINS_USERNAME>, and <YOUR_JENKINS_API_TOKEN> with appropriate values.
+
+Ensure Jenkins credentials are set up as a "Jenkins credential ID" (e.g., jenkins-credentials) for authentication.
+
+
+
+
+Additional Notes:
+
+You must have the Jenkins http_request plugin installed for this to work.
+
+The authentication field should point to Jenkins credentials created with your username and API token. You can add this by navigating to "Manage Jenkins" > "Manage Credentials."
+
+Make sure Job 2 accepts being triggered remotely (check "Trigger builds remotely (e.g., from scripts)" option under Job 2's configuration).
+
+
+This setup allows you to schedule Job 2 with a delay calculated based on the input date and time, making it easier to manage timed triggers directly through the Jenkins REST API.
