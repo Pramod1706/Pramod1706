@@ -1,78 +1,35 @@
-If the curl command and Postman are working, but the Ansible playbook using the uri module is not, it suggests that there might be some subtle differences in how the requests are being made. Let’s troubleshoot and refine the Ansible playbook further.
+pipeline {
+    agent any
+    parameters {
+        string(name: 'TRIGGER_DATE', defaultValue: '2024-10-19', description: 'Date to trigger Job 2 (format: YYYY-MM-DD)')
+        string(name: 'TRIGGER_TIME', defaultValue: '15:30', description: 'Time to trigger Job 2 (24-hour format: HH:mm)')
+    }
+    stages {
+        stage('Schedule Job 2') {
+            steps {
+                script {
+                    // Read parameters
+                    def triggerDate = params.TRIGGER_DATE
+                    def triggerTime = params.TRIGGER_TIME
 
-Troubleshooting Steps
+                    // Parse the desired time
+                    def triggerDateTime = Date.parse("yyyy-MM-dd HH:mm", "${triggerDate} ${triggerTime}")
+                    def currentTime = new Date()
 
-1. Check the Ansible Version: Ensure you are using a recent version of Ansible, as there could be improvements or bug fixes in the uri module.
+                    // Calculate delay in seconds
+                    def delayInSeconds = (triggerDateTime.time - currentTime.time) / 1000
 
+                    if (delayInSeconds > 0) {
+                        echo "Waiting for ${delayInSeconds} seconds to trigger Job 2 at ${triggerDateTime}."
+                        sleep time: delayInSeconds, unit: 'SECONDS'
+                    } else {
+                        echo "The specified time has already passed. Triggering Job 2 immediately."
+                    }
 
-2. Modify the uri Task for Debugging: Let's modify the uri task to include more debug information to see exactly what is being sent and received.
-
-
-
-Updated Ansible Playbook
-
-Here’s a revised playbook with additional debug statements to capture the details:
-
----
-- name: Retrieve and print Jira ticket details using the uri module
-  hosts: localhost
-  tasks:
-    - name: Get Jira ticket details
-      uri:
-        url: "https://your-jira-instance.atlassian.net/rest/api/2/issue/{{ ticket_id }}"
-        method: GET
-        user: "{{ jira_username }}"
-        password: "{{ jira_api_token }}"
-        force_basic_auth: yes
-        return_content: yes
-        headers:
-          Content-Type: "application/json"
-          Accept: "application/json"
-      register: jira_response
-      no_log: false  # Set to false for debugging
-
-    - name: Display HTTP response
-      debug:
-        msg:
-          - "HTTP Status: {{ jira_response.status }}"
-          - "Response Body: {{ jira_response.content | default('No content') }}"
-
-    - name: Check if the request was successful
-      fail:
-        msg: "Failed to retrieve Jira ticket details. HTTP status code: {{ jira_response.status }}"
-      when: jira_response.status != 200
-
-    - name: Parse the JSON response from Jira
-      set_fact:
-        jira_data: "{{ jira_response.json }}"
-
-    - name: Print the Jira ticket status
-      debug:
-        msg: "The status of the Jira ticket is: {{ jira_data.fields.status.name }}"
-
-Key Changes:
-
-1. no_log: false: Temporarily set to false to see all output, including sensitive data like the HTTP response. Make sure to set this back to true or no_log: true after debugging.
-
-
-2. Display HTTP response: Added a task to show the HTTP status and response body. This will help you see what Ansible is receiving from the API.
-
-
-
-Running the Playbook:
-
-Run the playbook again and observe the output. This should help identify any discrepancies between the successful curl command and the Ansible request.
-
-ansible-playbook get_jira_ticket_uri.yml -e "jira_username=your-username jira_api_token=your-api-token ticket_id=TICKET-123"
-
-Analyze the Output:
-
-Check if the HTTP status is 200.
-
-Review the response body to see if it’s valid JSON or if there are any error messages from Jira.
-
-
-Next Steps:
-
-If you still encounter issues, please share the output from the playbook, particularly the HTTP status and response body. This information will be crucial in diagnosing the problem.
-
+                    // Trigger Job 2
+                    build job: 'Job2'
+                }
+            }
+        }
+    }
+}
