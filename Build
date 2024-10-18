@@ -1,3 +1,29 @@
+The error indicates that Jenkins' Groovy sandbox is blocking the use of the Date.parse() method, as it's considered a static method and isn't allowed in the sandbox for security reasons.
+
+To resolve this issue, you have two options:
+
+Option 1: Disable the Groovy Sandbox for the Job
+
+1. Go to your Jenkins job configuration.
+
+
+2. Uncheck the "Use Groovy Sandbox" option under the Pipeline Script section.
+
+
+3. Save and rerun the job.
+
+
+
+Disabling the sandbox will allow the use of static methods like Date.parse(), but it might also increase security risks if the script is not controlled.
+
+Option 2: Modify the Script to Avoid Using Static Methods
+
+Instead of using Date.parse(), use LocalDateTime and DateTimeFormatter which are not blocked by the sandbox. Here is the updated Jenkinsfile:
+
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
+import java.time.Duration
+
 pipeline {
     agent any
     parameters {
@@ -12,12 +38,13 @@ pipeline {
                     def triggerDate = params.TRIGGER_DATE
                     def triggerTime = params.TRIGGER_TIME
 
-                    // Parse the desired time
-                    def triggerDateTime = Date.parse("yyyy-MM-dd HH:mm", "${triggerDate} ${triggerTime}")
-                    def currentTime = new Date()
+                    // Parse the desired time using LocalDateTime
+                    def formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+                    def triggerDateTime = LocalDateTime.parse("${triggerDate} ${triggerTime}", formatter)
+                    def currentTime = LocalDateTime.now()
 
-                    // Calculate delay in seconds
-                    def delayInSeconds = (triggerDateTime.time - currentTime.time) / 1000
+                    // Calculate the delay in seconds
+                    def delayInSeconds = Duration.between(currentTime, triggerDateTime).getSeconds()
 
                     if (delayInSeconds > 0) {
                         echo "Waiting for ${delayInSeconds} seconds to trigger Job 2 at ${triggerDateTime}."
@@ -33,3 +60,12 @@ pipeline {
         }
     }
 }
+
+Explanation:
+
+This version uses LocalDateTime and DateTimeFormatter from Java's java.time package, which avoids the use of restricted static methods.
+
+The script should work even if the Groovy sandbox is enabled.
+
+
+Try one of these solutions, and it should resolve the issue you're facing.
