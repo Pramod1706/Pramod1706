@@ -1,28 +1,12 @@
-The error indicates that Jenkins' Groovy sandbox is blocking the use of the Date.parse() method, as it's considered a static method and isn't allowed in the sandbox for security reasons.
+The error indicates that the Groovy sandbox is blocking the use of the Duration.between() method, which is a static method and hence not permitted within the sandbox environment.
 
-To resolve this issue, you have two options:
+To work around this issue without disabling the sandbox, you can avoid using Duration.between() and manually calculate the difference in seconds using ChronoUnit.SECONDS. Here's the updated script:
 
-Option 1: Disable the Groovy Sandbox for the Job
-
-1. Go to your Jenkins job configuration.
-
-
-2. Uncheck the "Use Groovy Sandbox" option under the Pipeline Script section.
-
-
-3. Save and rerun the job.
-
-
-
-Disabling the sandbox will allow the use of static methods like Date.parse(), but it might also increase security risks if the script is not controlled.
-
-Option 2: Modify the Script to Avoid Using Static Methods
-
-Instead of using Date.parse(), use LocalDateTime and DateTimeFormatter which are not blocked by the sandbox. Here is the updated Jenkinsfile:
+Updated Job 1 Jenkinsfile:
 
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.time.Duration
+import java.time.temporal.ChronoUnit
 
 pipeline {
     agent any
@@ -43,8 +27,8 @@ pipeline {
                     def triggerDateTime = LocalDateTime.parse("${triggerDate} ${triggerTime}", formatter)
                     def currentTime = LocalDateTime.now()
 
-                    // Calculate the delay in seconds
-                    def delayInSeconds = Duration.between(currentTime, triggerDateTime).getSeconds()
+                    // Calculate the delay in seconds using ChronoUnit.SECONDS.between
+                    def delayInSeconds = ChronoUnit.SECONDS.between(currentTime, triggerDateTime)
 
                     if (delayInSeconds > 0) {
                         echo "Waiting for ${delayInSeconds} seconds to trigger Job 2 at ${triggerDateTime}."
@@ -63,9 +47,9 @@ pipeline {
 
 Explanation:
 
-This version uses LocalDateTime and DateTimeFormatter from Java's java.time package, which avoids the use of restricted static methods.
+The updated script uses ChronoUnit.SECONDS.between to calculate the delay, which should be more sandbox-friendly than Duration.between().
 
-The script should work even if the Groovy sandbox is enabled.
+This avoids using restricted static methods and relies on safer operations permitted within the Groovy sandbox.
 
 
-Try one of these solutions, and it should resolve the issue you're facing.
+Try this revised script, and it should bypass the sandbox restrictions while still achieving the desired scheduling.
