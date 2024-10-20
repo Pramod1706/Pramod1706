@@ -2,39 +2,22 @@ pipeline {
     agent any
 
     environment {
-        JIRA_URL = 'https://your-jira-instance.atlassian.net'
-        JIRA_TICKET = 'PROJECT-123'
-        JIRA_USER = 'your-email@example.com'
-        JIRA_API_TOKEN = 'your-api-token'
+        VERSION = '1.56.78-1.0.6' // Example value, replace with your actual variable
     }
 
     stages {
-        stage('Fetch Jira Ticket') {
+        stage('Extract Version') {
             steps {
                 script {
-                    try {
-                        def response = sh(script: """
-                            curl -u ${JIRA_USER}:${JIRA_API_TOKEN} \
-                            -X GET \
-                            -H "Accept: application/json" \
-                            ${JIRA_URL}/rest/api/3/issue/${JIRA_TICKET}
+                    if (VERSION) {
+                        def extractedVersion = sh(script: """
+                            echo "${VERSION}" | sed 's/-.*//'
                         """, returnStdout: true).trim()
                         
-                        def jiraData = readJSON text: response
-                        env.JIRA_KEY = jiraData.key
-                        
-                        echo "Jira Ticket ID: ${env.JIRA_KEY}"
-                    } catch (Exception e) {
-                        echo "Error fetching Jira ticket: ${e.message}"
-                        error "Failed to fetch Jira ticket"
+                        echo "Extracted Version: ${extractedVersion}"
+                    } else {
+                        echo "VERSION is null or empty"
                     }
-                }
-            }
-        }
-        stage('Use Jira Key') {
-            steps {
-                script {
-                    echo "Using Jira Ticket ID in another stage: ${env.JIRA_KEY}"
                 }
             }
         }
