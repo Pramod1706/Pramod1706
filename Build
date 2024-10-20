@@ -1,17 +1,34 @@
-Got it! If you want to pass parameters to the job you're triggering via the Jenkins API, you'll need to include them in the curl request as well. I'll update the Jenkinsfile to show how you can pass parameters along with the delay.
+Great! Storing sensitive information like usernames and API tokens directly in the Jenkinsfile is not ideal. Instead, it's better to use Jenkins' built-in credentials management. This will keep your credentials secure and make your pipeline cleaner.
 
-Updated Jenkinsfile with Parameters:
+Here's how you can update your Jenkins pipeline to use credentials:
 
-In this version, we'll add a few steps:
+Step 1: Store Credentials in Jenkins
 
-1. Define Parameters: You can add parameters directly in your pipeline.
-
-
-2. Modify the curl Command: Include the parameters as part of the API request.
+1. Go to Jenkins Dashboard.
 
 
+2. Navigate to "Manage Jenkins" > "Manage Credentials".
 
-Here's how you can do it:
+
+3. Choose the appropriate scope (e.g., "Global" or specific to a folder).
+
+
+4. Click “Add Credentials”.
+
+
+5. Set the Kind to "Username with password".
+
+
+6. Enter your Jenkins username as the username and your API token as the password.
+
+
+7. Give it a Credential ID (e.g., jenkins-api-creds). You'll use this ID in the pipeline.
+
+
+
+Step 2: Update Jenkinsfile to Use the Credentials
+
+Here’s how you can modify the Jenkinsfile:
 
 pipeline {
     agent any
@@ -20,7 +37,6 @@ pipeline {
         TARGET_DATE = '2024-10-25 12:00:00' 
         JENKINS_URL = "http://jenkins-server-url" // Update with your Jenkins server URL
         JOB_NAME = "YOUR_JOB_NAME" // Update with the job you want to trigger
-        JENKINS_AUTH = 'your-username:your-api-token' // Replace with appropriate credentials
     }
     parameters {
         string(name: 'PARAM1', defaultValue: 'value1', description: 'First parameter')
@@ -57,21 +73,24 @@ pipeline {
         stage('Trigger Job with Delay and Parameters') {
             steps {
                 script {
-                    // Construct the URL to trigger the job with parameters
-                    def params = [
-                        "PARAM1=${params.PARAM1}",
-                        "PARAM2=${params.PARAM2}"
-                    ].join('&')
+                    // Use Jenkins Credentials to get username and token
+                    withCredentials([usernamePassword(credentialsId: 'jenkins-api-creds', usernameVariable: 'JENKINS_USER', passwordVariable: 'JENKINS_TOKEN')]) {
+                        // Construct the URL to trigger the job with parameters
+                        def params = [
+                            "PARAM1=${params.PARAM1}",
+                            "PARAM2=${params.PARAM2}"
+                        ].join('&')
 
-                    def jenkinsUrl = "${JENKINS_URL}/job/${JOB_NAME}/buildWithParameters?delay=${env.CALCULATED_DELAY}sec&${params}"
-                    def encodedAuth = JENKINS_AUTH.bytes.encodeBase64().toString()
+                        def jenkinsUrl = "${JENKINS_URL}/job/${JOB_NAME}/buildWithParameters?delay=${env.CALCULATED_DELAY}sec&${params}"
+                        def encodedAuth = "${JENKINS_USER}:${JENKINS_TOKEN}".bytes.encodeBase64().toString()
 
-                    // Make a request to Jenkins API
-                    sh """
-                    curl -X POST "${jenkinsUrl}" \
-                    --header "Authorization: Basic ${encodedAuth}" \
-                    --header "Content-Type: application/x-www-form-urlencoded"
-                    """
+                        // Make a request to Jenkins API
+                        sh """
+                        curl -X POST "${jenkinsUrl}" \
+                        --header "Authorization: Basic ${encodedAuth}" \
+                        --header "Content-Type: application/x-www-form-urlencoded"
+                        """
+                    }
                 }
             }
         }
@@ -80,46 +99,36 @@ pipeline {
 
 Explanation:
 
-1. Pipeline Parameters: Define your parameters using the parameters block. These will be available in the params object (e.g., params.PARAM1).
+1. Storing Credentials Securely:
 
+The withCredentials block retrieves the username and API token securely.
 
-2. Constructing the URL:
+usernamePassword: This type of credential allows you to access the stored username and password (API token) using environment variables.
 
-The parameters are added to the query string using "${params.PARAM1}" format.
-
-They are joined together using & to pass multiple parameters.
-
-
-
-3. Triggering the Job:
-
-The curl command is updated to include these parameters and the delay.
-
-Authentication is handled using basic auth, which is encoded to ensure it works with the Jenkins API.
+Replace 'jenkins-api-creds' with the ID of the credentials you created in Jenkins.
 
 
 
+2. Using Environment Variables:
 
-Example Execution:
+The username and token are temporarily stored in JENKINS_USER and JENKINS_TOKEN.
 
-If your pipeline parameters are set to:
-
-PARAM1: exampleValue1
-
-PARAM2: exampleValue2
+The script then encodes them for the Authorization header.
 
 
-The curl request will effectively look like:
 
-curl -X POST "http://jenkins-server-url/job/YOUR_JOB_NAME/buildWithParameters?delay=3600sec&PARAM1=exampleValue1&PARAM2=exampleValue2" \
---header "Authorization: Basic yourEncodedAuthString" \
---header "Content-Type: application/x-www-form-urlencoded"
+3. Secure Handling:
 
-Additional Tips:
-
-Jenkins Credentials: Consider storing credentials securely using Jenkins' built-in credential store and accessing them with the credentialsId option to avoid hardcoding sensitive information.
-
-Error Handling: You can add conditions to check if the job trigger was successful and handle any failures or retries accordingly.
+Credentials are not hardcoded in the pipeline, making it safer and easier to maintain.
 
 
-Would this updated version fit your use case, or is there any part you’d like to tweak further?
+
+
+Benefits:
+
+Security: Credentials are managed securely within Jenkins.
+
+Clean Pipeline Code: Your Jenkinsfile is cleaner and doesn’t expose sensitive data.
+
+
+Would you like any further clarification or adjustments to this approach?
