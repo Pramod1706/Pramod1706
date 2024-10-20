@@ -1,53 +1,77 @@
-To trigger Job 2 using the Jenkins REST API with a delay, you can modify the script to use the httpRequest step, which allows you to send HTTP requests directly from the Jenkins pipeline. Here’s how you can do it:
+Got it! If you want to pass parameters to the job you're triggering via the Jenkins API, you'll need to include them in the curl request as well. I'll update the Jenkinsfile to show how you can pass parameters along with the delay.
 
-Job 1 Jenkinsfile:
+Updated Jenkinsfile with Parameters:
+
+In this version, we'll add a few steps:
+
+1. Define Parameters: You can add parameters directly in your pipeline.
+
+
+2. Modify the curl Command: Include the parameters as part of the API request.
+
+
+
+Here's how you can do it:
 
 pipeline {
     agent any
-    parameters {
-        string(name: 'TRIGGER_DATE', defaultValue: '2024-10-19', description: 'Date to trigger Job 2 (format: YYYY-MM-DD)')
-        string(name: 'TRIGGER_TIME', defaultValue: '15:30', description: 'Time to trigger Job 2 (24-hour format: HH:mm)')
-    }
     environment {
-        JENKINS_URL = 'http://<JENKINS_SERVER_URL>' // Replace with your Jenkins server URL
-        JOB_NAME = 'Job2' // Replace with your Job 2 name
-        USERNAME = '<YOUR_JENKINS_USERNAME>'
-        API_TOKEN = '<YOUR_JENKINS_API_TOKEN>'
+        // Define your target date in a recognizable format (e.g., yyyy-MM-dd HH:mm:ss)
+        TARGET_DATE = '2024-10-25 12:00:00' 
+        JENKINS_URL = "http://jenkins-server-url" // Update with your Jenkins server URL
+        JOB_NAME = "YOUR_JOB_NAME" // Update with the job you want to trigger
+        JENKINS_AUTH = 'your-username:your-api-token' // Replace with appropriate credentials
+    }
+    parameters {
+        string(name: 'PARAM1', defaultValue: 'value1', description: 'First parameter')
+        string(name: 'PARAM2', defaultValue: 'value2', description: 'Second parameter')
     }
     stages {
-        stage('Schedule Job 2') {
+        stage('Calculate Delay') {
             steps {
                 script {
-                    // Read parameters
-                    def triggerDate = params.TRIGGER_DATE
-                    def triggerTime = params.TRIGGER_TIME
-
-                    // Parse the desired trigger date and time
-                    def formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
-                    def triggerDateTime = java.time.LocalDateTime.parse("${triggerDate} ${triggerTime}", formatter)
-
-                    // Get the current date and time
-                    def currentTime = java.time.LocalDateTime.now()
-
-                    // Calculate the difference in seconds
-                    def delayInSeconds = java.time.temporal.ChronoUnit.SECONDS.between(currentTime, triggerDateTime)
-
-                    if (delayInSeconds > 0) {
-                        echo "Current time is: ${currentTime}"
-                        echo "Trigger time is: ${triggerDateTime}"
-                        echo "Scheduling Job 2 with a delay of ${delayInSeconds} seconds."
-
-                        // Trigger Job 2 via Jenkins REST API
-                        def response = httpRequest(
-                            httpMode: 'POST',
-                            url: "${env.JENKINS_URL}/job/${env.JOB_NAME}/buildWithParameters?delay=${delayInSeconds}sec",
-                            authentication: 'jenkins-credentials' // Make sure this matches a Jenkins credential ID
-                        )
-
-                        echo "Job 2 triggered with status: ${response.status}"
-                    } else {
-                        echo "The specified time (${triggerDateTime}) has already passed. Unable to schedule Job 2."
+                    // Parse the target date and the current date
+                    def targetDate = Date.parse("yyyy-MM-dd HH:mm:ss", TARGET_DATE)
+                    def currentDate = new Date()
+                    
+                    // Calculate the difference in milliseconds
+                    def delayMillis = targetDate.getTime() - currentDate.getTime()
+                    
+                    // Convert the delay to seconds
+                    def delaySeconds = (delayMillis / 1000).toInteger()
+                    
+                    // Ensure the delay is not negative (if the target date is in the past)
+                    if (delaySeconds < 0) {
+                        echo "The target date is in the past. No delay will be applied."
+                        delaySeconds = 0
                     }
+                    
+                    // Log the delay for reference
+                    echo "Calculated delay in seconds: ${delaySeconds}"
+
+                    // Save delay value for further stages
+                    env.CALCULATED_DELAY = delaySeconds
+                }
+            }
+        }
+        stage('Trigger Job with Delay and Parameters') {
+            steps {
+                script {
+                    // Construct the URL to trigger the job with parameters
+                    def params = [
+                        "PARAM1=${params.PARAM1}",
+                        "PARAM2=${params.PARAM2}"
+                    ].join('&')
+
+                    def jenkinsUrl = "${JENKINS_URL}/job/${JOB_NAME}/buildWithParameters?delay=${env.CALCULATED_DELAY}sec&${params}"
+                    def encodedAuth = JENKINS_AUTH.bytes.encodeBase64().toString()
+
+                    // Make a request to Jenkins API
+                    sh """
+                    curl -X POST "${jenkinsUrl}" \
+                    --header "Authorization: Basic ${encodedAuth}" \
+                    --header "Content-Type: application/x-www-form-urlencoded"
+                    """
                 }
             }
         }
@@ -56,38 +80,46 @@ pipeline {
 
 Explanation:
 
-1. Parameters:
-
-The pipeline accepts TRIGGER_DATE and TRIGGER_TIME as inputs.
+1. Pipeline Parameters: Define your parameters using the parameters block. These will be available in the params object (e.g., params.PARAM1).
 
 
+2. Constructing the URL:
 
-2. Jenkins REST API Call:
+The parameters are added to the query string using "${params.PARAM1}" format.
 
-The script calculates the delay between the current time and the input time.
-
-It then sends a POST request to the Jenkins REST API endpoint for Job 2 using httpRequest.
-
-The delay parameter in the URL specifies how many seconds Jenkins should wait before triggering Job 2.
+They are joined together using & to pass multiple parameters.
 
 
 
-3. Environment Variables:
+3. Triggering the Job:
 
-Replace <JENKINS_SERVER_URL>, <YOUR_JENKINS_USERNAME>, and <YOUR_JENKINS_API_TOKEN> with appropriate values.
+The curl command is updated to include these parameters and the delay.
 
-Ensure Jenkins credentials are set up as a "Jenkins credential ID" (e.g., jenkins-credentials) for authentication.
+Authentication is handled using basic auth, which is encoded to ensure it works with the Jenkins API.
 
 
 
 
-Additional Notes:
+Example Execution:
 
-You must have the Jenkins http_request plugin installed for this to work.
+If your pipeline parameters are set to:
 
-The authentication field should point to Jenkins credentials created with your username and API token. You can add this by navigating to "Manage Jenkins" > "Manage Credentials."
+PARAM1: exampleValue1
 
-Make sure Job 2 accepts being triggered remotely (check "Trigger builds remotely (e.g., from scripts)" option under Job 2's configuration).
+PARAM2: exampleValue2
 
 
-This setup allows you to schedule Job 2 with a delay calculated based on the input date and time, making it easier to manage timed triggers directly through the Jenkins REST API.
+The curl request will effectively look like:
+
+curl -X POST "http://jenkins-server-url/job/YOUR_JOB_NAME/buildWithParameters?delay=3600sec&PARAM1=exampleValue1&PARAM2=exampleValue2" \
+--header "Authorization: Basic yourEncodedAuthString" \
+--header "Content-Type: application/x-www-form-urlencoded"
+
+Additional Tips:
+
+Jenkins Credentials: Consider storing credentials securely using Jenkins' built-in credential store and accessing them with the credentialsId option to avoid hardcoding sensitive information.
+
+Error Handling: You can add conditions to check if the job trigger was successful and handle any failures or retries accordingly.
+
+
+Would this updated version fit your use case, or is there any part you’d like to tweak further?
