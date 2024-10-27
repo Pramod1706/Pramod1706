@@ -1,5 +1,5 @@
 ---
-- name: Create a Jira ticket
+- name: Create a Jira ticket using curl
   hosts: localhost
   gather_facts: false
   vars:
@@ -13,50 +13,40 @@
       This is implemented to fix the issue with firstProposedDate data.\n\n
       Production Deployment Jira: {{ jira_Ticket }}\n
       [Application]: WREN\n
-      
     jira_priority: "Medium"
-    jira_labels:
-      - GRA_WREN_DEVOPS
-      - WREN_PROD_DEPLOYMENT
+    jira_labels: '["GRA_WREN_DEVOPS", "WREN_PROD_DEPLOYMENT"]'
+    jira_url: "https://alm-jira.systems.uk.hsbc/jira/rest/api/2/issue"
+    custom_username: "your_username"
+    custom_password: "your_api_token"
 
   tasks:
-    - name: Create a Jira issue
-      uri:
-        url: "https://alm-jira.systems.uk.hsbc/jira/rest/api/2/issue"
-        method: POST
-        user: "{{ custom_username }}"
-        password: "{{ custom_password }}"
-        force_basic_auth: yes
-        headers:
-          Content-Type: "application/json"
-        body: |
-          {
-            "fields": {
-              "project": {
-                "key": "MXE"
-              },
-              "summary": "WREN API Production & Cont Deployment - {{ API_Name }} - v{{ apiVersion }}",
-              "description": "{{ jira_description | to_json }}",
-              "issuetype": {
-                "name": "Task"
-              },
-              "priority": {
-                "name": "{{ jira_priority }}"
-              },
-              "labels": {{ jira_labels | to_json }}
-            }
+    - name: Create a Jira issue using curl
+      shell: |
+        curl -D- -u {{ custom_username }}:{{ custom_password }} -X POST --data '{
+          "fields": {
+            "project": {
+              "key": "MXE"
+            },
+            "summary": "WREN API Production & Cont Deployment - {{ API_Name }} - v{{ apiVersion }}",
+            "description": "{{ jira_description | to_json }}",
+            "issuetype": {
+              "name": "Task"
+            },
+            "priority": {
+              "name": "{{ jira_priority }}"
+            },
+            "labels": {{ jira_labels }}
           }
-        body_format: json
-        return_content: yes
+        }' -H "Content-Type: application/json" {{ jira_url }}
       register: jira_response
 
     - name: Show the response
-      set_fact:
-        jira_response_value: "{{ jira_response.json }}"
+      debug:
+        var: jira_response.stdout
 
     - name: Set Jira Ticket
       set_stats:
         data:
-          ticketRef: "{{ jira_response_value.key }}"
+          ticketRef: "{{ jira_response.stdout | regex_search('\"key\":\"([^\"]+)\"', '\\1') }}"
         per_host: false
         aggregate: false
