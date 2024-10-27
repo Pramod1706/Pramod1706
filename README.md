@@ -36,7 +36,7 @@
                 "key": "MXE"
               },
               "summary": "WREN API Production & Cont Deployment - {{ API_Name }} - v{{ apiVersion }}",
-              "description": "{{ jira_description }}",
+              "description": "{{ jira_description | to_json }}",
               "issuetype": {
                 "name": "Task"
               },
