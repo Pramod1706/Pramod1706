@@ -1,7 +1,3 @@
-Based on the images, here's a refined version of your Ansible playbook for creating a Jira ticket:
-
-Ansible Playbook: Create_Jira.yml
-
 ---
 - name: Create a Jira ticket
   hosts: localhost
@@ -10,15 +6,13 @@ Ansible Playbook: Create_Jira.yml
     API_Name: "{{ API_Name }}"
     apiVersion: "{{ apiVersion }}"
     jira_description: |
-      This is a SYSTEM generated WREN API Production Deployment Scheduler ticket.
-      Production deployment - WREN API Production & Cont Deployment - {{ API_Name }} - v{{ apiVersion }}
-      Full release notes available at https://alm-confluence.systems.uk.hsbc/confluence/display/GRAN/{{ API_Name }}-v{{ apiVersion }}
-      
-      Description of Update:
-      {{ Deployment_Description }}
-      
-      Production Deployment Jira: {{ jira_Ticket }}
-      [Application]: WREN
+      This is a SYSTEM generated WREN API Production Deployment Scheduler ticket.\n
+      Production deployment - replacement of version v{{ apiVersion }} with v{{ apiVersion }}.10.6\n
+      Full release notes available at https://alm-confluence.systems.uk.hsbc/confluence/display/GRAN/{{ API_Name }}-v{{ apiVersion }}\n\n
+      Description of Update:\n
+      This is implemented to fix the issue with firstProposedDate data.\n\n
+      Production Deployment Jira: {{ jira_Ticket }}\n
+      [Application]: WREN\n
       
     jira_priority: "Medium"
     jira_labels:
@@ -66,31 +60,3 @@ Ansible Playbook: Create_Jira.yml
           ticketRef: "{{ jira_response_value.key }}"
         per_host: false
         aggregate: false
-
-Explanation:
-
-1. Variables Section: Defined variables such as API_Name, apiVersion, jira_description, jira_priority, and jira_labels.
-
-
-2. uri Task: The uri module is used to send a POST request to Jira's API endpoint to create an issue.
-
-url: Your Jira instance URL.
-
-user/password: Authentication credentials.
-
-force_basic_auth: Ensures authentication even if the server does not initially request it.
-
-body: The JSON payload that describes the Jira issue to be created.
-
-register: Captures the response for later use.
-
-
-
-3. Setting Variables: Used set_fact to capture the response.
-
-
-4. Setting Jira Ticket Reference: Captures the Jira ticket reference for further usage.
-
-
-
-Make sure to update any values or placeholders accordingly.
