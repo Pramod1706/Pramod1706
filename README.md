@@ -1,86 +1,54 @@
-If you prefer to use the uri module to create a Jira issue via REST API, here's an example playbook. This approach gives you more flexibility in specifying the request details.
+Here's an Ansible playbook to send an email using the mail module. This example allows you to specify the SMTP host, port, sender email, and username for authentication:
 
-Ansible Playbook: create_jira_issue_with_uri.yml
+Ansible Playbook: send_email.yml
 
 ---
-- name: Create a Jira Issue using REST API
+- name: Send email notification
   hosts: localhost
   gather_facts: no
-  vars:
-    jira_url: "https://your-jira-instance.atlassian.net"
-    jira_user: "your-email@example.com"
-    jira_api_token: "your-jira-api-token"
-    jira_project_key: "PROJ"  # Replace with your Jira project key
-    jira_issue_type: "Task"   # Replace with the issue type (e.g., Task, Bug, Story, etc.)
-    jira_summary: "Automated Issue Creation from Ansible"
-    jira_description: |
-      This issue was created using an Ansible playbook via the REST API. 
-      It includes all the necessary fields for a typical issue.
-    jira_priority: "Medium"
-    jira_assignee: "assignee-username"
-    jira_labels:
-      - ansible
-      - automation
-
   tasks:
-    - name: Create Jira issue
-      uri:
-        url: "{{ jira_url }}/rest/api/2/issue"
-        method: POST
-        user: "{{ jira_user }}"
-        password: "{{ jira_api_token }}"
-        force_basic_auth: yes
-        headers:
-          Content-Type: "application/json"
-        body: |
-          {
-            "fields": {
-              "project": {
-                "key": "{{ jira_project_key }}"
-              },
-              "summary": "{{ jira_summary }}",
-              "description": "{{ jira_description }}",
-              "issuetype": {
-                "name": "{{ jira_issue_type }}"
-              },
-              "priority": {
-                "name": "{{ jira_priority }}"
-              },
-              "assignee": {
-                "name": "{{ jira_assignee }}"
-              },
-              "labels": {{ jira_labels | to_json }}
-            }
-          }
-        body_format: json
-        return_content: yes
-      register: jira_response
+    - name: Send email with SMTP settings
+      mail:
+        host: "{{ smtp_host }}"
+        port: "{{ smtp_port }}"
+        username: "{{ smtp_username }}"
+        password: "{{ smtp_password }}"
+        to: "{{ recipient_email }}"
+        from: "{{ sender_email }}"
+        subject: "{{ email_subject }}"
+        body: "{{ email_body }}"
+        secure: starttls
+      vars:
+        smtp_host: "smtp.example.com"    # Replace with your SMTP host
+        smtp_port: 587                  # SMTP port, e.g., 587 for TLS or 465 for SSL
+        smtp_username: "your_username"  # Your SMTP username
+        smtp_password: "your_password"  # Your SMTP password
+        sender_email: "sender@example.com"  # Sender's email address
+        recipient_email: "recipient@example.com"  # Recipient's email address
+        email_subject: "Deployment Approval Request"
+        email_body: |
+          Dear Approver,
 
-    - name: Show the created issue details
-      debug:
-        msg: "Created Jira issue response: {{ jira_response.json }}"
+          A deployment request has been initiated for version X.X.X of the API.
+          Please review and provide approval.
+
+          Regards,
+          Your Team
 
 Explanation:
 
-Variables: Define the Jira instance URL, credentials, and issue details.
+mail module: Sends an email using the specified SMTP server.
 
-Tasks:
+Parameters:
 
-The uri module sends a POST request to Jira's REST API to create a new issue.
+host and port: Define the SMTP server and port.
 
-The force_basic_auth ensures the credentials are sent correctly.
+username and password: For authentication with the SMTP server.
 
-The body contains the JSON payload with issue details, including fields like project, summary, description, priority, and assignee.
+to, from, subject, body: Basic email details.
 
-The debug task displays the response, which should include the created issue details.
+secure: Set to starttls for secure transmission (can also be ssl).
 
 
 
-Notes:
-
-Make sure to replace placeholders like your-jira-instance and your-email@example.com with your actual Jira instance URL and login details.
-
-Ensure your Jira account has permissions to create issues via the API.
-
-Customize the JSON payload to include any additional fields as needed.
-
+Replace the placeholders with actual values as needed. Make sure to keep sensitive data like smtp_password secure, possibly by using Ansible Vault.
