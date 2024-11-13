@@ -1,90 +1,57 @@
-Here’s a Jenkinsfile that uses environment variables for the username and password, sets up the JSON payload in a variable, and sends it to a CREATE API using an HTTP POST request.
+To add variables to the Ansible job template scheduling in the playbook, you can pass the extra_vars parameter in the JSON payload of the curl command. Here’s how you could modify your playbook:
 
-In this example, I'll assume that:
-
-env.API_USER and env.API_PASSWORD contain the username and password.
-
-jsonData is the JSON payload to send to the API.
-
-env.CREATE_API_URL is the URL for the API endpoint.
+1. Define the variables you want to pass as extra_vars.
 
 
-Here’s how you can set up the Jenkinsfile:
+2. Add extra_vars as a JSON object in the -d payload of your curl request.
 
-pipeline {
-    agent any
-    environment {
-        API_USER = 'yourUsername'       // Set the username here or from Jenkins credentials
-        API_PASSWORD = 'yourPassword'   // Set the password here or from Jenkins credentials
-        CREATE_API_URL = 'https://example.com/api/create' // Set your API endpoint URL
-    }
-    stages {
-        stage('Prepare JSON Data') {
-            steps {
-                script {
-                    // Define the JSON payload
-                    def jsonData = [
-                        "name"     : "Sample Name",
-                        "description" : "Sample description",
-                        "priority" : "High",
-                        "status"   : "Open"
-                    ]
-                    // Convert the Groovy map to a JSON string
-                    env.JSON_DATA = groovy.json.JsonOutput.toJson(jsonData)
-                    echo "JSON Data: ${env.JSON_DATA}"
-                }
-            }
-        }
-        stage('Send API Request') {
-            steps {
-                script {
-                    // Send the HTTP request with JSON data, username, and password
-                    def response = httpRequest(
-                        httpMode: 'POST',
-                        url: env.CREATE_API_URL,
-                        contentType: 'APPLICATION_JSON',
-                        requestBody: env.JSON_DATA,
-                        authentication: "${env.API_USER}:${env.API_PASSWORD}"
-                    )
 
-                    // Log the response
-                    echo "Response Code: ${response.status}"
-                    echo "Response Content: ${response.content}"
-                }
-            }
-        }
-    }
-}
+
+Here’s how your playbook code might look with these adjustments:
+
+- name: Manually format the schedule start date
+  set_fact:
+    formatted_date: "{{ ansibleSchedulerDate.replace('-', '') | replace(':', '') | replace('T', '') }}"
+
+- name: Print formatted date
+  debug:
+    msg: "Formatted Date: {{ formatted_date }}"
+
+- name: Schedule job in Ansible Tower
+  shell: |
+    curl -X POST -u "{{ custom_username }}:{{ custom_password }}" \
+    "https://ansiblecentral.hc.cloud.uk.hsbc/api/v2/job_templates/71012/schedules/" \
+    -H "Content-Type: application/json" \
+    -d '{
+          "name": "Wren Production Deployment: {{ API_Name }} - {{ apiVersion }}",
+          "rrule": "DTSTART:{{ formatted_date }}\nRRULE:FREQ=DAILY;INTERVAL=1;COUNT=4",
+          "extra_vars": {
+            "variable_name_1": "{{ variable_value_1 }}",
+            "variable_name_2": "{{ variable_value_2 }}"
+          }
+        }'
+  register: response
+
+- name: Show response
+  debug:
+    var: response.stdout
+
+- name: Send email to the team
+  mail:
+    host: "{{ smtp_host }}"
+    port: "{{ smtp_port }}"
+    username: "{{ smtp_username }}"
+    password: "{{ smtp_password }}"
+    to: "{{ smtp_to }}"
+    subject: "Ansible Job Scheduled"
+    body: "The job has been scheduled with the following response:\n{{ response.stdout }}"
 
 Explanation:
 
-1. Environment Variables:
+extra_vars: This section is added inside the JSON payload under "extra_vars", which allows you to pass any variables you need for the Ansible job. Replace "variable_name_1" and "variable_value_1" with the actual variable names and values you want to pass.
 
-API_USER and API_PASSWORD are used as the username and password.
-
-CREATE_API_URL holds the API endpoint URL.
+Variable Values: Define variable_value_1, variable_value_2, etc., in your playbook or as variables in your inventory as needed.
 
 
+Make sure that your Ansible Tower (or AWX) job template is set up to accept these extra_vars. This will allow you to pass dynamic data into the scheduled job.
 
-2. Stage Prepare JSON Data:
-
-Defines a JSON payload as a Groovy map in jsonData.
-
-Converts the map to a JSON string using groovy.json.JsonOutput.toJson(jsonData) and stores it in env.JSON_DATA for use in the next stage.
-
-
-
-3. Stage Send API Request:
-
-Uses httpRequest to send a POST request to the API endpoint with env.JSON_DATA as the payload.
-
-The authentication parameter is set to use the values from env.API_USER and env.API_PASSWORD.
-
-The response is logged with the status code and content.
-
-
-
-
-Note:
-
-For sensitive information like usernames and passwords, it’s better to store them as Jenkins credentials rather than in the Jenkinsfile directly. If needed, you can retrieve these credentials securely in the Jenkinsfile using the withCredentials block.
