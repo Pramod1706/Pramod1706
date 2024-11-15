@@ -1,6 +1,4 @@
-If jq is not found on the system, you need to install it before running the playbook. You can add a task in your Ansible playbook to install jq on the target hosts.
-
-Here's how you can modify the playbook to include a step for installing jq:
+To avoid using jq, we can use grep and sed commands to extract the tokens from the JSON response. Here’s the updated playbook:
 
 ---
 - name: Configure Kubernetes with OIDC
@@ -14,17 +12,12 @@ Here's how you can modify the playbook to include a step for installing jq:
     kubectlCmd: "kubectl"                          # The kubectl command, could be the path to kubectl if it's not in PATH
 
   tasks:
-    - name: Ensure jq is installed
-      package:
-        name: jq
-        state: present
-
-    - name: Get OIDC tokens
+    - name: Get OIDC tokens without jq
       shell: |
         set -x
         oidc_temp=$(curl -sk -u {{ ansible_env.USER }}:{{ ansible_env.PASSWORD }} -X GET {{ idpapi }}) \
-        && oidc_id_token=$(echo "${oidc_temp}" | jq -r '.id_token') \
-        && oidc_refresh_token=$(echo "${oidc_temp}" | jq -r '.refresh_token') \
+        && oidc_id_token=$(echo "${oidc_temp}" | grep -o '"id_token":"[^"]*' | sed 's/"id_token":"//') \
+        && oidc_refresh_token=$(echo "${oidc_temp}" | grep -o '"refresh_token":"[^"]*' | sed 's/"refresh_token":"//') \
         && base64 -d <<< "{{ idpcert }}" > /tmp_cert \
         && {{ kubectlCmd }} config --kubeconfig=kubeconfigfile set-cluster kubernetes --server={{ apiserver }} \
           --certificate-authority=/tmp_cert --embed-certs=true \
@@ -43,19 +36,21 @@ Here's how you can modify the playbook to include a step for installing jq:
       debug:
         var: kubectl_config_output.stdout
 
-Explanation
+Explanation of Changes
 
-Ensure jq is installed: This task installs jq using the Ansible package module, ensuring it's available before the main tasks run.
+Extracting id_token and refresh_token:
 
-The package module works with different package managers (like apt on Debian-based systems and yum on RHEL-based systems).
+Instead of using jq, we use grep and sed to parse the JSON response and extract the id_token and refresh_token.
 
+grep -o '"id_token":"[^"]*' | sed 's/"id_token":"//':
 
+grep -o '"id_token":"[^"]*': Finds the part of the JSON containing id_token.
 
-Additional Notes
-
-1. If your hosts have different package managers, the package module should handle it automatically. Otherwise, you may need to specify the module for each system, e.g., apt for Ubuntu/Debian or yum for CentOS/RHEL.
-
-
-2. Run this playbook with elevated privileges (become: yes) if the
+sed 's/"id_token":"//': Removes the id_token":" part, leaving just the token value.
 
 
+Similarly, grep -o '"refresh_token":"[^"]*' | sed 's/"refresh_token":"//' extracts the refresh_token field.
+
+
+
+This approach avoids using jq and should work as long as the JSON structure is simple and does not contain nested or complex objects.
