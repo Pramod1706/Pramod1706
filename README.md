@@ -1,18 +1,11 @@
-To execute the script in an Ansible playbook, you can use the shell or command module. Here’s how you can structure the playbook:
+If jq is not found on the system, you need to install it before running the playbook. You can add a task in your Ansible playbook to install jq on the target hosts.
 
-1. Create a playbook file (e.g., configure_kubernetes_oidc.yml).
-
-
-2. Define the variables in the playbook or pass them as extra variables.
-
-
-
-Here is an example playbook for this purpose:
+Here's how you can modify the playbook to include a step for installing jq:
 
 ---
 - name: Configure Kubernetes with OIDC
   hosts: all
-  become: yes  # if needed
+  become: yes  # Elevate privileges if required
   vars:
     idpapi: "https://example.com/idp/api"          # Replace with your actual IdP API endpoint
     apiserver: "https://kubernetes.example.com"    # Replace with your Kubernetes API server
@@ -21,12 +14,17 @@ Here is an example playbook for this purpose:
     kubectlCmd: "kubectl"                          # The kubectl command, could be the path to kubectl if it's not in PATH
 
   tasks:
+    - name: Ensure jq is installed
+      package:
+        name: jq
+        state: present
+
     - name: Get OIDC tokens
       shell: |
         set -x
         oidc_temp=$(curl -sk -u {{ ansible_env.USER }}:{{ ansible_env.PASSWORD }} -X GET {{ idpapi }}) \
-        && oidc_id_token=$(jq -r '.id_token' <<< "${oidc_temp}") \
-        && oidc_refresh_token=$(jq -r '.refresh_token' <<< "${oidc_temp}") \
+        && oidc_id_token=$(echo "${oidc_temp}" | jq -r '.id_token') \
+        && oidc_refresh_token=$(echo "${oidc_temp}" | jq -r '.refresh_token') \
         && base64 -d <<< "{{ idpcert }}" > /tmp_cert \
         && {{ kubectlCmd }} config --kubeconfig=kubeconfigfile set-cluster kubernetes --server={{ apiserver }} \
           --certificate-authority=/tmp_cert --embed-certs=true \
@@ -45,34 +43,19 @@ Here is an example playbook for this purpose:
       debug:
         var: kubectl_config_output.stdout
 
-Explanation of the Playbook
+Explanation
 
-vars: Define variables for idpapi, apiserver, idpissuer, idpcert, and kubectlCmd. Adjust these values as per your environment.
+Ensure jq is installed: This task installs jq using the Ansible package module, ensuring it's available before the main tasks run.
 
-idpcert uses lookup('file', 'path/to/idpcert') | b64encode to read and encode the certificate file.
-
-
-tasks:
-
-Get OIDC tokens: Executes the shell script using shell module.
-
-It fetches OIDC tokens, creates the certificate file, and configures the Kubernetes context and credentials in the specified kubeconfig file (kubeconfigfile).
-
-environment: Passes the USER and PASSWORD environment variables. Replace these with suitable values or other secure methods.
-
-
-Show configuration output: Displays the output of the configuration command for debugging.
+The package module works with different package managers (like apt on Debian-based systems and yum on RHEL-based systems).
 
 
 
-Notes
+Additional Notes
 
-1. Environment Variables: Replace USER and PASSWORD with secure methods, like Ansible Vault or Ansible environment lookup, if sensitive.
-
-
-2. Error Handling: The set -x in the shell script enables command tracing for debugging, but you can add set -e to stop on errors.
+1. If your hosts have different package managers, the package module should handle it automatically. Otherwise, you may need to specify the module for each system, e.g., apt for Ubuntu/Debian or yum for CentOS/RHEL.
 
 
-3. kubeconfigfile: Make sure kubeconfigfile is writable by the user running this script.
+2. Run this playbook with elevated privileges (become: yes) if the
 
 
