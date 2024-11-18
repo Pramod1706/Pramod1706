@@ -1,56 +1,130 @@
-To avoid using jq, we can use grep and sed commands to extract the tokens from the JSON response. Here’s the updated playbook:
+Here is the updated Ansible playbook that avoids using jq and instead uses grep and sed to parse the OIDC tokens.
+
+Ansible Playbook: kubeconfig_setup.yml
 
 ---
-- name: Configure Kubernetes with OIDC
+- name: Configure Kubernetes OIDC Login and Test Cluster Connection
   hosts: all
-  become: yes  # Elevate privileges if required
   vars:
-    idpapi: "https://example.com/idp/api"          # Replace with your actual IdP API endpoint
-    apiserver: "https://kubernetes.example.com"    # Replace with your Kubernetes API server
-    idpissuer: "https://example.com/issuer"        # Replace with your OIDC issuer URL
-    idpcert: "{{ lookup('file', 'path/to/idpcert') | b64encode }}"  # Replace with path to IdP certificate file
-    kubectlCmd: "kubectl"                          # The kubectl command, could be the path to kubectl if it's not in PATH
-
+    user: "{{ lookup('env', 'USER') }}"
+    password: "{{ lookup('env', 'PASSWORD') }}"
+    idpapi: "<IDP_API_ENDPOINT>"
+    idpissuer: "<IDP_ISSUER_URL>"
+    apiserver: "<KUBERNETES_API_SERVER>"
+    api_cert: "{{ lookup('env', 'apiCert') }}"
+    kubeconfig_path: "./kubeconfig"
   tasks:
-    - name: Get OIDC tokens without jq
+
+    - name: Fetch OIDC tokens from IDP
       shell: |
-        set -x
-        oidc_temp=$(curl -sk -u {{ ansible_env.USER }}:{{ ansible_env.PASSWORD }} -X GET {{ idpapi }}) \
-        && oidc_id_token=$(echo "${oidc_temp}" | grep -o '"id_token":"[^"]*' | sed 's/"id_token":"//') \
-        && oidc_refresh_token=$(echo "${oidc_temp}" | grep -o '"refresh_token":"[^"]*' | sed 's/"refresh_token":"//') \
-        && base64 -d <<< "{{ idpcert }}" > /tmp_cert \
-        && {{ kubectlCmd }} config --kubeconfig=kubeconfigfile set-cluster kubernetes --server={{ apiserver }} \
-          --certificate-authority=/tmp_cert --embed-certs=true \
-        && {{ kubectlCmd }} config --kubeconfig=kubeconfigfile set-context kubernetes --cluster=kubernetes --user={{ ansible_env.USER }} \
-        && {{ kubectlCmd }} config --kubeconfig=kubeconfigfile set-credentials {{ ansible_env.USER }} --auth-provider=oidc \
-          --auth-provider-arg=idp-issuer-url={{ idpissuer }} --auth-provider-arg=client-id=kubernetes \
-          --auth-provider-arg=refresh-token=${oidc_refresh_token} --auth-provider-arg=id-token=${oidc_id_token} \
-          --auth-provider-arg=idp-certificate-authority-data="{{ idpcert }}" \
-        && {{ kubectlCmd }} config --kubeconfig=kubeconfigfile use-context kubernetes
-      environment:
-        USER: "{{ lookup('env', 'USER') }}"       # The environment variable for the user, replace as needed
-        PASSWORD: "{{ lookup('env', 'PASSWORD') }}"  # The environment variable for the password, replace as needed
-      register: kubectl_config_output
+        set -e
+        curl -sk -u {{ user }}:{{ password }} -X GET {{ idpapi }}
+      register: oidc_tokens
+      changed_when: false
 
-    - name: Show configuration output
+    - name: Parse OIDC ID Token
+      shell: |
+        echo '{{ oidc_tokens.stdout }}' | grep -o '"id_token":"[^"]*"' | sed 's/"id_token":".*"/\1/'
+      register: oidc_id_token
+      changed_when: false
+
+    - name: Parse OIDC Refresh Token
+      shell: |
+        echo '{{ oidc_tokens.stdout }}' | grep -o '"refresh_token":"[^"]*"' | sed 's/"refresh_token":".*"/\1/'
+      register: oidc_refresh_token
+      changed_when: false
+
+    - name: Decode API Certificate
+      shell: |
+        echo '{{ api_cert }}' | base64 -d > /tmp/cert.pem
+      changed_when: false
+
+    - name: Set Kubernetes Cluster
+      shell: |
+        kubectl config --kubeconfig={{ kubeconfig_path }} set-cluster kubernetes \
+          --server={{ apiserver }} \
+          --certificate-authority=/tmp/cert.pem \
+          --embed-certs=true
+      changed_when: false
+
+    - name: Set Kubernetes Context
+      shell: |
+        kubectl config --kubeconfig={{ kubeconfig_path }} set-context kubernetes \
+          --cluster=kubernetes \
+          --user={{ user }}
+      changed_when: false
+
+    - name: Set Kubernetes User Credentials
+      shell: |
+        kubectl config --kubeconfig={{ kubeconfig_path }} set-credentials {{ user }} \
+          --auth-provider=oidc \
+          --auth-provider-arg=idp-issuer-url={{ idpissuer }} \
+          --auth-provider-arg=client-id=kubernetes \
+          --auth-provider-arg=id-token={{ oidc_id_token.stdout }} \
+          --auth-provider-arg=refresh-token={{ oidc_refresh_token.stdout }} \
+          --auth-provider-arg=idp-certificate-authority-data=/tmp/cert.pem
+      changed_when: false
+
+    - name: Use Kubernetes Context
+      shell: |
+        kubectl config --kubeconfig={{ kubeconfig_path }} use-context kubernetes
+      changed_when: false
+
+    - name: Verify Kubernetes Connection
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} version
+      register: kube_connection
+      failed_when: kube_connection.rc != 0
+      changed_when: false
+
+    - name: Output Kubernetes Connection Success
       debug:
-        var: kubectl_config_output.stdout
+        msg: "Kubernetes Cluster API connection successful: {{ apiserver }}"
+      when: kube_connection.rc == 0
 
-Explanation of Changes
+Explanation
 
-Extracting id_token and refresh_token:
+1. OIDC Token Parsing:
 
-Instead of using jq, we use grep and sed to parse the JSON response and extract the id_token and refresh_token.
+grep -o '"id_token":"[^"]*"' extracts the id_token key-value pair from the response.
 
-grep -o '"id_token":"[^"]*' | sed 's/"id_token":"//':
-
-grep -o '"id_token":"[^"]*': Finds the part of the JSON containing id_token.
-
-sed 's/"id_token":"//': Removes the id_token":" part, leaving just the token value.
+sed 's/"id_token":".*"/\1/' removes the key and quotes, leaving only the value.
 
 
-Similarly, grep -o '"refresh_token":"[^"]*' | sed 's/"refresh_token":"//' extracts the refresh_token field.
+Similarly, the refresh_token is extracted using the same pattern.
+
+
+2. Base64 Decoding:
+
+The base64 -d command decodes the apiCert environment variable into a certificate file.
 
 
 
-This approach avoids using jq and should work as long as the JSON structure is simple and does not contain nested or complex objects.
+3. Kubernetes Configuration:
+
+Uses kubectl commands to set up the Kubernetes configuration.
+
+
+
+4. Cluster Verification:
+
+Runs kubectl version to verify the connection to the Kubernetes cluster.
+
+
+
+
+Usage
+
+1. Replace placeholders like <IDP_API_ENDPOINT>, <IDP_ISSUER_URL>, and <KUBERNETES_API_SERVER> with actual values.
+
+
+2. Set the USER, PASSWORD, and apiCert environment variables.
+
+
+3. Execute the playbook:
+
+ansible-playbook -i inventory kubeconfig_setup.yml
+
+
+
+This approach eliminates the need for jq while achieving the same functionality.
