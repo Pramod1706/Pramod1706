@@ -1,12 +1,14 @@
-If set -e is not functioning as expected in your Ansible shell tasks, it might be because set -e only affects the script running in the shell. Ansible wraps commands in an intermediate shell which may interfere with set -e behavior. A better approach is to handle errors explicitly using the return code of each command.
+Below is an updated Ansible playbook that includes the installation of the Kubernetes CLI (kubectl) along with the previously defined tasks to log in to Kubernetes using OIDC.
 
-Here’s the corrected version of the playbook without relying on set -e, ensuring proper error handling:
-
-Updated Playbook
 
 ---
-- name: Configure Kubernetes OIDC Login and Test Cluster Connection
+
+Ansible Playbook: setup_kubectl_and_kubeconfig.yml
+
+---
+- name: Install Kubernetes CLI and Configure OIDC Login
   hosts: all
+  become: true
   vars:
     user: "{{ lookup('env', 'USER') }}"
     password: "{{ lookup('env', 'PASSWORD') }}"
@@ -15,7 +17,42 @@ Updated Playbook
     apiserver: "<KUBERNETES_API_SERVER>"
     api_cert: "{{ lookup('env', 'apiCert') }}"
     kubeconfig_path: "./kubeconfig"
+    kubectl_version: "v1.28.0"  # Replace with the desired kubectl version
   tasks:
+    - name: Install dependencies
+      package:
+        name:
+          - curl
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - sed
+        state: present
+
+    - name: Add Kubernetes apt repository key
+      shell: |
+        curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+      args:
+        creates: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+
+    - name: Add Kubernetes apt repository
+      shell: |
+        echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" > /etc/apt/sources.list.d/kubernetes.list
+      args:
+        creates: /etc/apt/sources.list.d/kubernetes.list
+
+    - name: Install kubectl
+      package:
+        name: kubectl
+        state: present
+      register: kubectl_install_status
+
+    - name: Verify kubectl installation
+      shell: |
+        kubectl version --client
+      register: kubectl_version_check
+      failed_when: kubectl_version_check.rc != 0
+      changed_when: false
 
     - name: Fetch OIDC tokens from IDP
       shell: |
@@ -120,34 +157,59 @@ Updated Playbook
         msg: "Kubernetes Cluster API connection successful: {{ apiserver }}"
       when: kube_connection.rc == 0
 
-Key Changes:
 
-1. Explicit Error Handling:
+---
 
-Added checks (if [ $? -ne 0 ]; then exit 1; fi) to ensure failures are explicitly caught after each command.
+Explanation:
 
+1. Install kubectl:
 
+The playbook ensures kubectl is installed using the official Kubernetes repository.
 
-2. failed_when:
-
-Added failed_when conditions to handle task failures based on the return code (rc).
-
-
-
-3. Debugging:
-
-Clear error messages are added at each step to help identify where issues occur.
+Installs dependencies like curl, sed, and others necessary for this setup.
 
 
 
+2. OIDC Configuration:
 
-Benefits:
+Fetches OIDC tokens using curl.
 
-Ensures that errors are not silently ignored.
-
-Provides clear feedback in case of failures.
-
-Avoids relying on set -e, making the playbook more robust in the Ansible environment.
+Parses the response for id_token and refresh_token using grep and sed.
 
 
-Let me know if you encounter any issues!
+
+3. Kubernetes Configuration:
+
+Sets up the kubeconfig file with kubectl commands.
+
+Configures cluster, context, and user credentials.
+
+
+
+4. Verification:
+
+Confirms kubectl is installed and functional.
+
+Verifies connectivity to the Kubernetes cluster.
+
+
+
+
+
+---
+
+Usage:
+
+1. Replace placeholders (<IDP_API_ENDPOINT>, <IDP_ISSUER_URL>, <KUBERNETES_API_SERVER>) with actual values.
+
+
+2. Set environment variables for USER, PASSWORD, and apiCert.
+
+
+3. Run the playbook:
+
+ansible-playbook -i inventory setup_kubectl_and_kubeconfig.yml
+
+
+
+This will install kubectl, configure OIDC login, and verify the connection to your Kubernetes cluster. Let me know if you encounter issues!
