@@ -1,71 +1,131 @@
-- name: Configure Kubernetes OIDC Login and Test Cluster Connection
+To implement a Helm operation that uses a chart stored in your GitHub repository, we can enhance the helm_operations role to clone the repository, locate the chart, and perform the operation. Below is the complete setup:
+
+
+---
+
+roles/helm_operations/tasks/main.yml
+
+---
+- name: Clone Helm chart repository
+  git:
+    repo: "{{ helm_repo_url }}"
+    dest: "{{ helm_repo_path }}"
+    version: "{{ helm_repo_branch }}"
+  register: git_clone_result
+  changed_when: git_clone_result.changed
+  become: true
+
+- name: Locate Helm chart
+  find:
+    paths: "{{ helm_repo_path }}"
+    patterns: "{{ helm_chart_folder }}/*Chart.yaml"
+    file_type: file
+  register: helm_chart_result
+
+- name: Validate Helm chart path
+  fail:
+    msg: "No Helm chart found in the specified folder: {{ helm_chart_folder }}"
+  when: helm_chart_result.matched == 0
+
+- name: Execute Helm operation
+  shell: |
+    helm {{ helm_operation }} {{ helm_release_name }} \
+      --namespace {{ helm_namespace }} \
+      --kubeconfig {{ kubeconfig_path }} \
+      {{ helm_chart_result.files[0] | regex_replace('/Chart.yaml$', '') }} \
+      {{ '--set ' + helm_set_values | join(',') if helm_set_values is defined else '' }}
+  register: helm_command_output
+  failed_when: helm_command_output.rc != 0
+  changed_when: true
+
+- name: Log Helm operation success
+  debug:
+    msg: "Helm operation '{{ helm_operation }}' succeeded with output: {{ helm_command_output.stdout }}"
+  when: helm_command_output.rc == 0
+
+- name: Log Helm operation failure
+  debug:
+    msg: "Helm operation '{{ helm_operation }}' failed with error: {{ helm_command_output.stderr }}"
+  when: helm_command_output.rc != 0
+
+
+---
+
+roles/helm_operations/vars/main.yml
+
+helm_repo_url: "https://github.com/your_org/your_repo.git"  # GitHub repo URL
+helm_repo_path: "/tmp/helm_chart_repo"                     # Local path to clone the repo
+helm_repo_branch: "main"                                   # Branch to checkout
+helm_chart_folder: "charts/my-app"                         # Folder containing the Helm chart
+helm_operation: "install"                                  # Helm operation (install, upgrade, delete)
+helm_release_name: "my-app"                                # Name of the release
+helm_namespace: "default"                                  # Kubernetes namespace
+kubeconfig_path: "./kubeconfig"                            # Path to kubeconfig
+helm_set_values:
+  - "image.tag=1.0.0"
+  - "replicaCount=2"
+
+
+---
+
+Example Playbook
+
+playbook.yml
+
+---
+- name: Perform Kubernetes login and Helm operations
   hosts: all
-  vars:
-    user: "{{ lookup('env', 'USER') }}"
-    password: "{{ lookup('env', 'PASSWORD') }}"
-    idpapi: "<IDP_API_ENDPOINT>"
-    idpissuer: "<IDP_ISSUER_URL>"
-    apiserver: "<KUBERNETES_API_SERVER>"
-    api_cert: "{{ lookup('env', 'apiCert') }}"
-    kubeconfig_path: "./kubeconfig"
-  tasks:
+  roles:
+    - kubernetes_login  # Role for Kubernetes login (your first role)
+    - helm_operations   # Role for Helm operations
 
-    - name: Fetch OIDC tokens from IDP
-      uri:
-        url: "{{ idpapi }}"
-        user: "{{ user }}"
-        password: "{{ password }}"
-        method: GET
-        return_content: yes
-        status_code: 200
-      register: oidc_tokens
 
-    - name: Parse OIDC ID Token
-      set_fact:
-        oidc_id_token: "{{ oidc_tokens.content | from_json | json_query('id_token') }}"
+---
 
-    - name: Parse OIDC Refresh Token
-      set_fact:
-        oidc_refresh_token: "{{ oidc_tokens.content | from_json | json_query('refresh_token') }}"
+How It Works
 
-    - name: Decode API Certificate
-      copy:
-        content: "{{ api_cert | b64decode }}"
-        dest: /tmp/cert.pem
+1. Kubernetes Login:
 
-    - name: Set Kubernetes Cluster
-      command: >
-        kubectl config --kubeconfig={{ kubeconfig_path }} set-cluster kubernetes
-        --server={{ apiserver }}
-        --certificate-authority=/tmp/cert.pem
-        --embed-certs=true
+The kubernetes_login role should execute first and generate the kubeconfig.
 
-    - name: Set Kubernetes Context
-      command: >
-        kubectl config --kubeconfig={{ kubeconfig_path }} set-context kubernetes
-        --cluster=kubernetes
-        --user={{ user }}
 
-    - name: Set Kubernetes User Credentials
-      command: >
-        kubectl config --kubeconfig={{ kubeconfig_path }} set-credentials {{ user }}
-        --auth-provider=oidc
-        --auth-provider-arg=idp-issuer-url={{ idpissuer }}
-        --auth-provider-arg=client-id=kubernetes
-        --auth-provider-arg=id-token={{ oidc_id_token }}
-        --auth-provider-arg=refresh-token={{ oidc_refresh_token }}
-        --auth-provider-arg=idp-certificate-authority-data=/tmp/cert.pem
 
-    - name: Use Kubernetes Context
-      command: >
-        kubectl config --kubeconfig={{ kubeconfig_path }} use-context kubernetes
+2. Clone Helm Chart Repo:
 
-    - name: Verify Kubernetes Connection
-      command: >
-        kubectl --kubeconfig={{ kubeconfig_path }} version
-      register: kube_connection
+The git module clones the specified GitHub repository containing the Helm charts.
 
-    - name: Output Kubernetes Connection Success
-      debug:
-        msg: "Kubernetes Cluster API connection successful: {{ apiserver }}"
-      when: kube_connection.rc == 0
+
+
+3. Find the Chart:
+
+The find module searches for the Helm chart's Chart.yaml in the specified folder.
+
+
+
+4. Helm Operation:
+
+The helm command is constructed dynamically using the provided variables, including the path to the located Helm chart.
+
+
+
+
+
+---
+
+Running the Playbook
+
+ansible-playbook -i inventory.yml playbook.yml
+
+
+---
+
+Notes:
+
+Replace https://github.com/your_org/your_repo.git with your repository URL.
+
+Ensure the target machine has Helm installed, and the repository is accessible from it.
+
+The playbook dynamically adjusts based on the Helm chart folder, ensuring flexibility for any repo structure.
+
+
+Let me know if you'd like additional features or refinements!
