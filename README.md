@@ -1,131 +1,241 @@
-To implement a Helm operation that uses a chart stored in your GitHub repository, we can enhance the helm_operations role to clone the repository, locate the chart, and perform the operation. Below is the complete setup:
+To separate Helm deployment and cluster login into distinct roles, follow the updated structure below:
 
 
 ---
 
-roles/helm_operations/tasks/main.yml
+Updated Directory Structure
+
+deploy/
+├── inventory/
+│   └── ikp_clusters.yml
+├── vars/
+│   ├── cluster_vars.yml
+│   └── helm_vars.yml
+├── playbooks/
+│   ├── helm_deploy.yml
+│   └── roles/
+│       ├── cluster_login/
+│       │   ├── tasks/
+│       │   │   ├── oidc_login.yml
+│       │   │   ├── verify_cluster.yml
+│       │   └── templates/
+│       ├── helm_deploy/
+│       │   ├── tasks/
+│       │   │   ├── create_helm_chart.yml
+│       │   │   ├── deploy_helm.yml
+│       │   └── templates/
+│       │       ├── values.yml.j2
+│       │       └── Chart.yaml.j2
+
 
 ---
-- name: Clone Helm chart repository
-  git:
-    repo: "{{ helm_repo_url }}"
-    dest: "{{ helm_repo_path }}"
-    version: "{{ helm_repo_branch }}"
-  register: git_clone_result
-  changed_when: git_clone_result.changed
-  become: true
 
-- name: Locate Helm chart
-  find:
-    paths: "{{ helm_repo_path }}"
-    patterns: "{{ helm_chart_folder }}/*Chart.yaml"
-    file_type: file
-  register: helm_chart_result
+Step 1: Role for Cluster Login
 
-- name: Validate Helm chart path
-  fail:
-    msg: "No Helm chart found in the specified folder: {{ helm_chart_folder }}"
-  when: helm_chart_result.matched == 0
+1.1 Role: cluster_login
 
-- name: Execute Helm operation
+roles/cluster_login/tasks/oidc_login.yml:
+
+- name: Fetch OIDC tokens from IDP
   shell: |
-    helm {{ helm_operation }} {{ helm_release_name }} \
-      --namespace {{ helm_namespace }} \
-      --kubeconfig {{ kubeconfig_path }} \
-      {{ helm_chart_result.files[0] | regex_replace('/Chart.yaml$', '') }} \
-      {{ '--set ' + helm_set_values | join(',') if helm_set_values is defined else '' }}
-  register: helm_command_output
-  failed_when: helm_command_output.rc != 0
-  changed_when: true
+    response=$(curl -sk -u {{ kubernetes_user }}:{{ kubernetes_password }} -X GET {{ oidc_api }})
+    if [ $? -ne 0 ]; then
+      echo "Failed to fetch OIDC tokens"
+      exit 1
+    fi
+    echo $response
+  register: oidc_tokens
+  failed_when: oidc_tokens.rc != 0
 
-- name: Log Helm operation success
+- name: Parse OIDC ID Token
+  shell: |
+    echo '{{ oidc_tokens.stdout }}' | grep -o '"id_token":"[^"]*"' | sed 's/"id_token":"[^"]*"/\1/'
+  register: oidc_id_token
+  failed_when: oidc_id_token.rc != 0
+
+- name: Parse OIDC Refresh Token
+  shell: |
+    echo '{{ oidc_tokens.stdout }}' | grep -o '"refresh_token":"[^"]*"' | sed 's/"refresh_token":"[^"]*"/\1/'
+  register: oidc_refresh_token
+  failed_when: oidc_refresh_token.rc != 0
+
+- name: Decode API Certificate
+  shell: |
+    echo '{{ api_cert }}' | base64 -d > /tmp/cert.pem
+
+- name: Set Kubernetes Cluster
+  shell: |
+    kubectl config --kubeconfig={{ kubeconfig_path }} set-cluster kubernetes \
+      --server={{ apiserver }} \
+      --certificate-authority=/tmp/cert.pem \
+      --embed-certs=true
+
+- name: Set Kubernetes Context
+  shell: |
+    kubectl config --kubeconfig={{ kubeconfig_path }} set-context kubernetes \
+      --cluster=kubernetes \
+      --user={{ kubernetes_user }}
+
+- name: Set Kubernetes User Credentials
+  shell: |
+    kubectl config --kubeconfig={{ kubeconfig_path }} set-credentials {{ kubernetes_user }} \
+      --auth-provider=oidc \
+      --auth-provider-arg=idp-issuer-url={{ oidc_issuer_url }} \
+      --auth-provider-arg=client-id=kubernetes \
+      --auth-provider-arg=id-token={{ oidc_id_token.stdout }} \
+      --auth-provider-arg=refresh-token={{ oidc_refresh_token.stdout }}
+
+- name: Use Kubernetes Context
+  shell: |
+    kubectl config --kubeconfig={{ kubeconfig_path }} use-context kubernetes
+
+roles/cluster_login/tasks/verify_cluster.yml:
+
+- name: Verify Kubernetes connection
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} version
+  register: kube_connection
+  failed_when: kube_connection.rc != 0
+
+- name: Output Kubernetes Connection Success
   debug:
-    msg: "Helm operation '{{ helm_operation }}' succeeded with output: {{ helm_command_output.stdout }}"
-  when: helm_command_output.rc == 0
-
-- name: Log Helm operation failure
-  debug:
-    msg: "Helm operation '{{ helm_operation }}' failed with error: {{ helm_command_output.stderr }}"
-  when: helm_command_output.rc != 0
+    msg: "Kubernetes Cluster API connection successful: {{ apiserver }}"
 
 
 ---
 
-roles/helm_operations/vars/main.yml
+Step 2: Role for Helm Deployment
 
-helm_repo_url: "https://github.com/your_org/your_repo.git"  # GitHub repo URL
-helm_repo_path: "/tmp/helm_chart_repo"                     # Local path to clone the repo
-helm_repo_branch: "main"                                   # Branch to checkout
-helm_chart_folder: "charts/my-app"                         # Folder containing the Helm chart
-helm_operation: "install"                                  # Helm operation (install, upgrade, delete)
-helm_release_name: "my-app"                                # Name of the release
-helm_namespace: "default"                                  # Kubernetes namespace
-kubeconfig_path: "./kubeconfig"                            # Path to kubeconfig
-helm_set_values:
-  - "image.tag=1.0.0"
-  - "replicaCount=2"
+2.1 Role: helm_deploy
 
+roles/helm_deploy/tasks/create_helm_chart.yml:
 
----
+- name: Create Helm chart directories
+  file:
+    path: "/tmp/{{ item.name }}-chart"
+    state: directory
+  with_items: "{{ api_details }}"
 
-Example Playbook
+- name: Generate Chart.yaml
+  template:
+    src: "Chart.yaml.j2"
+    dest: "/tmp/{{ item.name }}-chart/Chart.yaml"
+  with_items: "{{ api_details }}"
 
-playbook.yml
+- name: Generate values.yaml
+  template:
+    src: "values.yml.j2"
+    dest: "/tmp/{{ item.name }}-chart/values.yaml"
+  with_items: "{{ api_details }}"
 
----
-- name: Perform Kubernetes login and Helm operations
-  hosts: all
-  roles:
-    - kubernetes_login  # Role for Kubernetes login (your first role)
-    - helm_operations   # Role for Helm operations
+roles/helm_deploy/tasks/deploy_helm.yml:
 
+- name: Deploy Helm chart
+  shell: >
+    helm upgrade --install {{ item.name }}
+    /tmp/{{ item.name }}-chart
+    --namespace {{ item.namespace }}
+    --create-namespace
+  with_items: "{{ api_details }}"
 
----
+roles/helm_deploy/templates/values.yml.j2:
 
-How It Works
+replicaCount: {{ item.replicas }}
+image:
+  repository: {{ item.image }}
 
-1. Kubernetes Login:
+roles/helm_deploy/templates/Chart.yaml.j2:
 
-The kubernetes_login role should execute first and generate the kubeconfig.
-
-
-
-2. Clone Helm Chart Repo:
-
-The git module clones the specified GitHub repository containing the Helm charts.
-
-
-
-3. Find the Chart:
-
-The find module searches for the Helm chart's Chart.yaml in the specified folder.
-
-
-
-4. Helm Operation:
-
-The helm command is constructed dynamically using the provided variables, including the path to the located Helm chart.
-
-
-
+apiVersion: v2
+name: {{ item.name }}
+description: Helm chart for {{ item.name }}
+version: 0.1.0
 
 
 ---
 
-Running the Playbook
+Step 3: Playbook to Combine Roles
 
-ansible-playbook -i inventory.yml playbook.yml
+Create a playbook to integrate both roles.
+
+playbooks/helm_deploy.yml:
+
+- name: Deploy APIs to Kubernetes Clusters
+  hosts: unix_controller
+  vars_files:
+    - "../vars/cluster_vars.yml"
+    - "../vars/helm_vars.yml"
+  tasks:
+    - name: Login to the cluster using OIDC
+      include_role:
+        name: cluster_login
+      tasks_from: oidc_login
+
+    - name: Verify Kubernetes access
+      include_role:
+        name: cluster_login
+      tasks_from: verify_cluster
+
+    - name: Create Helm charts for APIs
+      include_role:
+        name: helm_deploy
+      tasks_from: create_helm_chart
+
+    - name: Deploy Helm charts to the cluster
+      include_role:
+        name: helm_deploy
+      tasks_from: deploy_helm
 
 
 ---
 
-Notes:
+Step 4: Variables
 
-Replace https://github.com/your_org/your_repo.git with your repository URL.
+4.1 Cluster Variables
 
-Ensure the target machine has Helm installed, and the repository is accessible from it.
+vars/cluster_vars.yml:
 
-The playbook dynamically adjusts based on the Helm chart folder, ensuring flexibility for any repo structure.
+kubernetes_user: "your-username"
+kubernetes_password: "your-password"
+oidc_api: "https://idp.example.com/token"
+oidc_issuer_url: "https://idp.example.com"
+api_cert: "base64_encoded_cert"
+apiserver: "https://<cluster-api-server>"
+kubeconfig_path: "/tmp/kubeconfig"
+
+4.2 Helm Variables
+
+vars/helm_vars.yml:
+
+api_details:
+  - name: "api1"
+    namespace: "default"
+    image: "api1-image:latest"
+    replicas: 3
+  - name: "api2"
+    namespace: "default"
+    image: "api2-image:latest"
+    replicas: 2
 
 
-Let me know if you'd like additional features or refinements!
+---
+
+Step 5: Run the Playbook
+
+Execute the playbook:
+
+ansible-playbook -i inventory/ikp_clusters.yml playbooks/helm_deploy.yml
+
+
+---
+
+Summary
+
+cluster_login Role: Handles OIDC-based authentication and Kubernetes cluster context setup.
+
+helm_deploy Role: Handles Helm chart creation and deployment.
+
+Playbook: Combines both roles to deploy APIs to Kubernetes clusters using Helm.
+
+
+This separation ensures modularity and reusability. Let me know if you need additional adjustments!
