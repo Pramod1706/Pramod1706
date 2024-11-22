@@ -28,11 +28,11 @@
 
     - name: Decode API certificate
       shell: |
-        echo {{ apiCert }} | base64 -d > /tmp_cert
+        echo {{ apiCert }} | base64 -d > ~/tmp_cert
 
     - name: Set Kubernetes cluster
       shell: |
-        {{ kubectlCli }} config --kubeconfig=./kubeconfig set-cluster kubernetes --server={{ apiserver }} --certificate-authority=/tmp_cert --embed-certs=true
+        {{ kubectlCli }} config --kubeconfig=./kubeconfig set-cluster kubernetes --server={{ apiserver }} --certificate-authority=~/tmp_cert --embed-certs=true
 
     - name: Set Kubernetes context
       shell: |
