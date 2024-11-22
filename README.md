@@ -1,24 +1,25 @@
-Here's the Ansible playbook with variables matching the ones in your Groovy script:
+Thank you for the clarification! Below is the Ansible playbook written with variables matching your Groovy logic exactly:
 
 ---
 - name: Create kubeconfig and verify Kubernetes cluster connection
   hosts: localhost
   vars:
-    idapi: "{{ oidc_api_url }}"  # Replace with your OIDC API URL
-    apiserver: "{{ kube_apiserver }}"  # Replace with your Kubernetes API server
-    kube_config_repo_base_path: "/path/to/config"  # Replace with the base path for kubeconfig
     oidc_temp: "/tmp/cert"
-    kube_config_file: "{{ env.WORKSPACE }}/{{ kube_config_repo_base_path }}/kubeconfigfile"
+    oidc_id_token: ""
+    idapi: "{{ lookup('env', 'idapi') }}"  # OIDC API URL
+    apiserver: "{{ lookup('env', 'apiserver') }}"  # Kubernetes API server
+    kube_config_file: "{{ env.WORKSPACE }}/{{ env.kube_config_repo_base_path }}/kubeconfigfile"
     env_USER: "{{ lookup('env', 'USER') }}"
     env_PASSWORD: "{{ lookup('env', 'PASSWORD') }}"
+    kubeConnectStatus: ""
 
   tasks:
     - name: Fetch OIDC ID token
       shell: |
-        curl -s -u '{{ env_USER }}:{{ env_PASSWORD }}' -X GET {{ idapi }}
+        curl -s -u "{{ env_USER }}:{{ env_PASSWORD }}" -X GET "{{ idapi }}"
       register: oidc_id_token_response
 
-    - name: Extract OIDC token
+    - name: Save OIDC token to variable
       set_fact:
         oidc_id_token: "{{ oidc_id_token_response.stdout }}"
 
@@ -39,57 +40,54 @@ Here's the Ansible playbook with variables matching the ones in your Groovy scri
           --cluster=kubernetes \
           --user="{{ env_USER }}"
         kubectl config use-context kubernetes
-      register: kubeconfig_status
+      register: create_kubeconfig_status
 
     - name: Verify kubeconfig creation
       fail:
-        msg: "IKP OIDC login failed: {{ kubeconfig_status.stderr }}"
-      when: kubeconfig_status.rc != 0
+        msg: "IKP OIDC login failed with error: {{ create_kubeconfig_status.stderr }}"
+      when: create_kubeconfig_status.rc != 0
 
-    - name: Save kubeconfig file to repo path
-      copy:
-        content: "{{ lookup('file', kube_config_file) }}"
-        dest: "{{ kube_config_repo_base_path }}/kubeconfigfile"
-      when: kubeconfig_status.rc == 0
+    - name: Log successful kubeconfig creation
+      debug:
+        msg: "IKP OIDC login successful. Kubeconfig file: {{ kube_config_file }}"
+      when: create_kubeconfig_status.rc == 0
 
-    - name: Test Kubernetes cluster API connection
+    - name: Test Kubernetes API connection
       shell: |
-        kubectl get nodes --kubeconfig={{ kube_config_file }}
-      register: kube_connection_status
+        kubectl version --kubeconfig={{ kube_config_file }}
+      register: kube_connect_status
 
-    - name: Verify Kubernetes API connection
+    - name: Verify Kubernetes connection
       fail:
-        msg: "Kubernetes Cluster API connection failed: {{ kube_connection_status.stderr }}"
-      when: kube_connection_status.rc != 0
+        msg: "Kubernetes Cluster API connection failed: {{ kube_connect_status.stderr }}"
+      when: kube_connect_status.rc != 0
 
-    - name: Log success message
+    - name: Log successful Kubernetes connection
       debug:
         msg: "Kubernetes Cluster API connection successful: {{ apiserver }}"
-      when: kube_connection_status.rc == 0
+      when: kube_connect_status.rc == 0
 
-Variable Mapping
+    - name: Handle unsupported authentication method
+      debug:
+        msg: "Kubernetes authentication method not supported."
+      when: oidc_id_token is not defined
 
-idapi corresponds to idapi in your Groovy script.
+Key Updates:
 
-apiserver corresponds to apiserver in your Groovy script.
+1. Variable Names:
 
-env_USER and env_PASSWORD mirror the same environment variables from the Groovy script.
-
-oidc_temp is the same as the temporary certificate path.
-
-kube_config_file is the kubeconfig file location.
-
-
-Additional Notes:
-
-1. Replace placeholders like {{ oidc_api_url }} and {{ kube_apiserver }} with actual values in your environment.
-
-
-2. The kube_config_repo_base_path and env.WORKSPACE should be updated with real paths.
-
-
-3. Ensure that kubectl and its dependencies are available on the host running this playbook.
+Directly use Groovy variable names: oidc_temp, idapi, apiserver, oidc_id_token, kube_config_file, env_USER, and env_PASSWORD.
 
 
 
-Let me know if you need further clarifications!
+2. Steps Mapping:
+
+Replicates the curl request, base64 decoding, and kubectl commands step by step.
+
+
+
+3. Error Handling: Includes failure messages similar to Groovy's throw new Exception.
+
+
+
+This playbook now closely mirrors the variable names and logic from the Groovy script. Let me know if there's anything else you'd like to refine!
