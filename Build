@@ -1,25 +1,182 @@
-pipeline {
-    agent any
+Sure! I'll use the exact variable names from your provided Groovy script to ensure consistency. Below is the complete end-to-end guide with proper variables aligned with your logic.
 
-    environment {
-        VERSION = '1.56.78-1.0.6' // Example value, replace with your actual variable
-    }
 
-    stages {
-        stage('Extract Version') {
-            steps {
-                script {
-                    if (VERSION) {
-                        def extractedVersion = sh(script: """
-                            echo "${VERSION}" | sed 's/-.*//'
-                        """, returnStdout: true).trim()
-                        
-                        echo "Extracted Version: ${extractedVersion}"
-                    } else {
-                        echo "VERSION is null or empty"
-                    }
-                }
-            }
-        }
-    }
-}
+---
+
+Directory Structure
+
+Ensure the structure for roles and playbooks is as follows:
+
+roles/
+├── cluster_login/
+│   ├── tasks/
+│   │   ├── main.yml  # Tasks for logging into clusters
+playbooks/
+├── cluster_login.yml  # Main playbook to run
+inventory/
+├── ikp_clusters.yml   # Inventory file
+
+
+---
+
+Playbook for Cluster Login
+
+playbooks/cluster_login.yml:
+
+- name: Login to Kubernetes clusters using OIDC
+  hosts: clusters
+  gather_facts: no
+  tasks:
+    - name: Login to the cluster using OIDC
+      include_role:
+        name: cluster_login
+
+
+---
+
+Role: cluster_login
+
+Main Task File
+
+roles/cluster_login/tasks/main.yml:
+
+- name: Fetch OIDC tokens from IDP
+  shell: |
+    set +x;
+    oidc_temp=$(curl -sk -u {{ USER }}:{{ PASSWORD }} -X GET {{ idpapi }}) &&
+    oidc_id_token=$(echo ${oidc_temp} | jq -r '.token.id_token') &&
+    oidc_refresh_token=$(echo ${oidc_temp} | jq -r '.token.refresh_token')
+    echo "${oidc_id_token},${oidc_refresh_token}"
+  register: oidc_tokens
+  failed_when: oidc_tokens.rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Parse OIDC ID Token
+  set_fact:
+    oidc_id_token: "{{ oidc_tokens.stdout.split(',')[0] }}"
+
+- name: Parse OIDC Refresh Token
+  set_fact:
+    oidc_refresh_token: "{{ oidc_tokens.stdout.split(',')[1] }}"
+
+- name: Decode API Certificate
+  shell: |
+    echo "{{ apiCert }}" | base64 -d > /tmp/cert.pem
+  failed_when: rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Set Kubernetes Cluster
+  shell: |
+    set +x;
+    kubectl config --kubeconfig=./kubeconfig set-cluster kubernetes \
+      --server={{ apiserver }} \
+      --certificate-authority=/tmp/cert.pem \
+      --embed-certs=true
+  failed_when: rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Set Kubernetes Context
+  shell: |
+    set +x;
+    kubectl config --kubeconfig=./kubeconfig set-context kubernetes \
+      --cluster=kubernetes \
+      --user={{ USER }}
+  failed_when: rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Set Kubernetes User Credentials
+  shell: |
+    set +x;
+    kubectl config --kubeconfig=./kubeconfig set-credentials {{ USER }} \
+      --auth-provider=oidc \
+      --auth-provider-arg=idp-issuer-url={{ idpissuer }} \
+      --auth-provider-arg=client-id=kubernetes \
+      --auth-provider-arg=id-token={{ oidc_id_token }} \
+      --auth-provider-arg=refresh-token={{ oidc_refresh_token }} \
+      --auth-provider-arg=idp-certificate-authority-data={{ idpcert }}
+  failed_when: rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Use Kubernetes Context
+  shell: |
+    set +x;
+    kubectl config --kubeconfig=./kubeconfig use-context kubernetes
+  failed_when: rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Validate Kubernetes Connection
+  shell: |
+    set +x;
+    kubectl --kubeconfig=./kubeconfig version
+  register: kube_connection
+  failed_when: kube_connection.rc != 0
+  args:
+    executable: /bin/bash
+
+- name: Output Success Message
+  debug:
+    msg: "Successfully connected to Kubernetes Cluster: {{ apiserver }}"
+
+
+---
+
+Inventory File
+
+inventory/ikp_clusters.yml:
+
+all:
+  children:
+    clusters:
+      hosts:
+        cluster1:
+          USER: "user1"
+          PASSWORD: "password1"
+          idpapi: "https://cluster1-idp/token"
+          apiserver: "https://cluster1-api-server"
+          apiCert: "base64_encoded_cert_1"
+          idpissuer: "https://cluster1-idp"
+          idpcert: "base64_encoded_idp_cert"
+        cluster2:
+          USER: "user2"
+          PASSWORD: "password2"
+          idpapi: "https://cluster2-idp/token"
+          apiserver: "https://cluster2-api-server"
+          apiCert: "base64_encoded_cert_2"
+          idpissuer: "https://cluster2-idp"
+          idpcert: "base64_encoded_idp_cert"
+
+
+---
+
+Steps to Run
+
+1. Verify Dependencies: Ensure the following are installed on the Unix host:
+
+kubectl
+
+jq
+
+curl
+
+
+
+2. Execute Playbook: Run the playbook using the inventory file:
+
+ansible-playbook -i inventory/ikp_clusters.yml playbooks/cluster_login.yml
+
+
+3. Expected Output:
+
+Successful login will display:
+
+Successfully connected to Kubernetes Cluster: <cluster1-api-server>
+Successfully connected to Kubernetes Cluster: <
+
+
+
