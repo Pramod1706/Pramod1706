@@ -1,226 +1,223 @@
-To separate Helm deployment and cluster login into distinct roles, follow the updated structure below:
+No problem! Let’s go through step-by-step instructions to create an Ansible setup that logs into multiple Kubernetes clusters, deploys Helm charts, and organizes everything cleanly.
 
 
 ---
 
-Updated Directory Structure
+Step 1: Prerequisites
 
-deploy/
+Ensure the following are ready:
+
+1. Unix Control Host:
+
+This is where Ansible will run.
+
+kubectl, helm, and ansible are installed.
+
+The control host has SSH access to itself (used for running Ansible tasks).
+
+
+
+2. Clusters:
+
+Each Kubernetes cluster's API server, user credentials, and certificates are accessible.
+
+Clusters use OIDC for authentication.
+
+
+
+
+
+---
+
+Step 2: Directory Structure
+
+Organize your project as follows:
+
+helm-deploy/
 ├── inventory/
-│   └── ikp_clusters.yml
-├── vars/
-│   ├── cluster_vars.yml
-│   └── helm_vars.yml
+│   └── ikp_clusters.yml      # Inventory file with cluster details
 ├── playbooks/
-│   ├── helm_deploy.yml
-│   └── roles/
-│       ├── cluster_login/
-│       │   ├── tasks/
-│       │   │   ├── oidc_login.yml
-│       │   │   ├── verify_cluster.yml
-│       │   └── templates/
-│       ├── helm_deploy/
-│       │   ├── tasks/
-│       │   │   ├── create_helm_chart.yml
-│       │   │   ├── deploy_helm.yml
-│       │   └── templates/
-│       │       ├── values.yml.j2
-│       │       └── Chart.yaml.j2
+│   └── helm_deploy.yml       # Main playbook
+├── roles/
+│   ├── cluster_login/        # Role for logging into clusters
+│   │   ├── tasks/
+│   │   │   └── main.yml      # Tasks for login
+│   ├── helm_deploy/          # Role for Helm chart deployment
+│   │   ├── tasks/
+│   │   │   ├── create_helm_chart.yml
+│   │   │   └── deploy_helm.yml
+├── vars/
+│   └── helm_vars.yml         # Variables for Helm deployment
 
 
 ---
 
-Step 1: Role for Cluster Login
+Step 3: Inventory File
 
-1.1 Role: cluster_login
+Define all cluster details in inventory/ikp_clusters.yml:
 
-roles/cluster_login/tasks/oidc_login.yml:
+all:
+  hosts:
+    unix_controller:
+      ansible_host: <unix_server_ip>
+      ansible_user: <unix_user>
+      ansible_ssh_private_key_file: /path/to/private/key
+      ansible_become: yes
+  children:
+    clusters:
+      hosts:
+        cluster1:
+          apiserver: "https://cluster1-api-server"
+          kubernetes_user: "user1"
+          kubernetes_password: "password1"
+          oidc_api: "https://cluster1-idp/token"
+          oidc_issuer_url: "https://cluster1-idp"
+          api_cert: "base64_encoded_cert_1"
+        cluster2:
+          apiserver: "https://cluster2-api-server"
+          kubernetes_user: "user2"
+          kubernetes_password: "password2"
+          oidc_api: "https://cluster2-idp/token"
+          oidc_issuer_url: "https://cluster2-idp"
+          api_cert: "base64_encoded_cert_2"
+
+
+---
+
+Step 4: Main Playbook
+
+Create the playbook that coordinates cluster login and Helm deployment.
+
+playbooks/helm_deploy.yml:
+
+- name: Deploy Helm charts to multiple clusters
+  hosts: unix_controller
+  vars_files:
+    - "../vars/helm_vars.yml"  # Load Helm variables
+  tasks:
+    - name: Login to each cluster
+      include_role:
+        name: cluster_login
+      vars:
+        apiserver: "{{ hostvars[item].apiserver }}"
+        kubernetes_user: "{{ hostvars[item].kubernetes_user }}"
+        kubernetes_password: "{{ hostvars[item].kubernetes_password }}"
+        oidc_api: "{{ hostvars[item].oidc_api }}"
+        oidc_issuer_url: "{{ hostvars[item].oidc_issuer_url }}"
+        api_cert: "{{ hostvars[item].api_cert }}"
+      with_items: "{{ groups['clusters'] }}"
+      loop_control:
+        loop_var: item
+
+    - name: Deploy Helm charts
+      include_role:
+        name: helm_deploy
+      with_items: "{{ groups['clusters'] }}"
+      loop_control:
+        loop_var: item
+
+
+---
+
+Step 5: Role: cluster_login
+
+This role handles logging into clusters.
+
+roles/cluster_login/tasks/main.yml:
 
 - name: Fetch OIDC tokens from IDP
   shell: |
     response=$(curl -sk -u {{ kubernetes_user }}:{{ kubernetes_password }} -X GET {{ oidc_api }})
-    if [ $? -ne 0 ]; then
-      echo "Failed to fetch OIDC tokens"
-      exit 1
-    fi
     echo $response
   register: oidc_tokens
-  failed_when: oidc_tokens.rc != 0
 
 - name: Parse OIDC ID Token
-  shell: |
-    echo '{{ oidc_tokens.stdout }}' | grep -o '"id_token":"[^"]*"' | sed 's/"id_token":"[^"]*"/\1/'
+  shell: echo '{{ oidc_tokens.stdout }}' | jq -r '.id_token'
   register: oidc_id_token
-  failed_when: oidc_id_token.rc != 0
-
-- name: Parse OIDC Refresh Token
-  shell: |
-    echo '{{ oidc_tokens.stdout }}' | grep -o '"refresh_token":"[^"]*"' | sed 's/"refresh_token":"[^"]*"/\1/'
-  register: oidc_refresh_token
-  failed_when: oidc_refresh_token.rc != 0
 
 - name: Decode API Certificate
-  shell: |
-    echo '{{ api_cert }}' | base64 -d > /tmp/cert.pem
+  shell: echo '{{ api_cert }}' | base64 -d > /tmp/cert.pem
 
-- name: Set Kubernetes Cluster
+- name: Configure Kubernetes cluster
   shell: |
-    kubectl config --kubeconfig={{ kubeconfig_path }} set-cluster kubernetes \
+    kubectl config set-cluster {{ item }} \
       --server={{ apiserver }} \
       --certificate-authority=/tmp/cert.pem \
       --embed-certs=true
 
-- name: Set Kubernetes Context
+- name: Configure Kubernetes user
   shell: |
-    kubectl config --kubeconfig={{ kubeconfig_path }} set-context kubernetes \
-      --cluster=kubernetes \
-      --user={{ kubernetes_user }}
-
-- name: Set Kubernetes User Credentials
-  shell: |
-    kubectl config --kubeconfig={{ kubeconfig_path }} set-credentials {{ kubernetes_user }} \
+    kubectl config set-credentials {{ kubernetes_user }} \
       --auth-provider=oidc \
       --auth-provider-arg=idp-issuer-url={{ oidc_issuer_url }} \
       --auth-provider-arg=client-id=kubernetes \
-      --auth-provider-arg=id-token={{ oidc_id_token.stdout }} \
-      --auth-provider-arg=refresh-token={{ oidc_refresh_token.stdout }}
+      --auth-provider-arg=id-token={{ oidc_id_token.stdout }}
 
-- name: Use Kubernetes Context
-  shell: |
-    kubectl config --kubeconfig={{ kubeconfig_path }} use-context kubernetes
+- name: Configure Kubernetes context
+  shell: kubectl config set-context {{ item }} --cluster={{ item }} --user={{ kubernetes_user }}
 
-roles/cluster_login/tasks/verify_cluster.yml:
-
-- name: Verify Kubernetes connection
-  shell: |
-    kubectl --kubeconfig={{ kubeconfig_path }} version
-  register: kube_connection
-  failed_when: kube_connection.rc != 0
-
-- name: Output Kubernetes Connection Success
-  debug:
-    msg: "Kubernetes Cluster API connection successful: {{ apiserver }}"
+- name: Use Kubernetes context
+  shell: kubectl config use-context {{ item }}
 
 
 ---
 
-Step 2: Role for Helm Deployment
+Step 6: Role: helm_deploy
 
-2.1 Role: helm_deploy
+a. Create Helm Chart
 
 roles/helm_deploy/tasks/create_helm_chart.yml:
 
 - name: Create Helm chart directories
-  file:
-    path: "/tmp/{{ item.name }}-chart"
-    state: directory
-  with_items: "{{ api_details }}"
+  shell: mkdir -p /tmp/{{ item }}/charts/{{ api_name }}
 
-- name: Generate Chart.yaml
-  template:
-    src: "Chart.yaml.j2"
-    dest: "/tmp/{{ item.name }}-chart/Chart.yaml"
-  with_items: "{{ api_details }}"
+- name: Create values.yml
+  copy:
+    dest: /tmp/{{ item }}/charts/{{ api_name }}/values.yml
+    content: |
+      replicas: {{ replicas }}
+      image:
+        repository: {{ image_repository }}
+        tag: {{ image_tag }}
+      service:
+        type: {{ service_type }}
+        port: {{ service_port }}
 
-- name: Generate values.yaml
-  template:
-    src: "values.yml.j2"
-    dest: "/tmp/{{ item.name }}-chart/values.yaml"
-  with_items: "{{ api_details }}"
+b. Deploy Helm Chart
 
 roles/helm_deploy/tasks/deploy_helm.yml:
 
 - name: Deploy Helm chart
-  shell: >
-    helm upgrade --install {{ item.name }}
-    /tmp/{{ item.name }}-chart
-    --namespace {{ item.namespace }}
-    --create-namespace
-  with_items: "{{ api_details }}"
+  shell: |
+    helm upgrade --install {{ release_name }} /tmp/{{ item }}/charts/{{ api_name }} \
+      --namespace {{ namespace }} \
+      --kubeconfig ~/.kube/config
+  register: helm_result
 
-roles/helm_deploy/templates/values.yml.j2:
-
-replicaCount: {{ item.replicas }}
-image:
-  repository: {{ item.image }}
-
-roles/helm_deploy/templates/Chart.yaml.j2:
-
-apiVersion: v2
-name: {{ item.name }}
-description: Helm chart for {{ item.name }}
-version: 0.1.0
+- name: Verify Helm deployment
+  shell: helm status {{ release_name }}
+  register: helm_status
 
 
 ---
 
-Step 3: Playbook to Combine Roles
+Step 7: Variables for Helm
 
-Create a playbook to integrate both roles.
+Define Helm variables in vars/helm_vars.yml:
 
-playbooks/helm_deploy.yml:
-
-- name: Deploy APIs to Kubernetes Clusters
-  hosts: unix_controller
-  vars_files:
-    - "../vars/cluster_vars.yml"
-    - "../vars/helm_vars.yml"
-  tasks:
-    - name: Login to the cluster using OIDC
-      include_role:
-        name: cluster_login
-      tasks_from: oidc_login
-
-    - name: Verify Kubernetes access
-      include_role:
-        name: cluster_login
-      tasks_from: verify_cluster
-
-    - name: Create Helm charts for APIs
-      include_role:
-        name: helm_deploy
-      tasks_from: create_helm_chart
-
-    - name: Deploy Helm charts to the cluster
-      include_role:
-        name: helm_deploy
-      tasks_from: deploy_helm
+api_name: "example-api"
+release_name: "example-release"
+namespace: "default"
+replicas: 3
+image_repository: "example-repo"
+image_tag: "latest"
+service_type: "ClusterIP"
+service_port: 80
 
 
 ---
 
-Step 4: Variables
-
-4.1 Cluster Variables
-
-vars/cluster_vars.yml:
-
-kubernetes_user: "your-username"
-kubernetes_password: "your-password"
-oidc_api: "https://idp.example.com/token"
-oidc_issuer_url: "https://idp.example.com"
-api_cert: "base64_encoded_cert"
-apiserver: "https://<cluster-api-server>"
-kubeconfig_path: "/tmp/kubeconfig"
-
-4.2 Helm Variables
-
-vars/helm_vars.yml:
-
-api_details:
-  - name: "api1"
-    namespace: "default"
-    image: "api1-image:latest"
-    replicas: 3
-  - name: "api2"
-    namespace: "default"
-    image: "api2-image:latest"
-    replicas: 2
-
-
----
-
-Step 5: Run the Playbook
+Step 8: Running the Playbook
 
 Execute the playbook:
 
@@ -231,11 +228,27 @@ ansible-playbook -i inventory/ikp_clusters.yml playbooks/helm_deploy.yml
 
 Summary
 
-cluster_login Role: Handles OIDC-based authentication and Kubernetes cluster context setup.
+Cluster Login:
 
-helm_deploy Role: Handles Helm chart creation and deployment.
-
-Playbook: Combines both roles to deploy APIs to Kubernetes clusters using Helm.
+cluster_login handles OIDC-based login and cluster context setup.
 
 
-This separation ensures modularity and reusability. Let me know if you need additional adjustments!
+Helm Deployment:
+
+helm_deploy creates Helm charts and deploys them.
+
+
+Inventory:
+
+Cluster-specific details are stored in ikp_clusters.yml.
+
+
+Flexibility:
+
+Add more clusters by updating the inventory.
+
+Helm variables can be extended for more customization.
+
+
+
+Let me know if you need further clarification!
