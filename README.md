@@ -10,6 +10,7 @@
     apiserver: "https://example.com/apiserver"
     idpissuer: "https://example.com/idpissuer"
     idpcert: "{{ lookup('env', 'idpcert') }}"
+    cert_path: "/home/{{ lookup('env', 'USER') }}/tmp_cert"
   tasks:
     - name: Get OIDC tokens
       shell: |
@@ -28,11 +29,11 @@
 
     - name: Decode API certificate
       shell: |
-        echo {{ apiCert }} | base64 -d > ~/tmp_cert
+        echo {{ apiCert }} | base64 -d > {{ cert_path }}
 
     - name: Set Kubernetes cluster
       shell: |
-        {{ kubectlCli }} config --kubeconfig=./kubeconfig set-cluster kubernetes --server={{ apiserver }} --certificate-authority=~/tmp_cert --embed-certs=true
+        {{ kubectlCli }} config --kubeconfig=./kubeconfig set-cluster kubernetes --server={{ apiserver }} --certificate-authority={{ cert_path }} --embed-certs=true
 
     - name: Set Kubernetes context
       shell: |
