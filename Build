@@ -1,276 +1,96 @@
-Here’s a detailed, simplified, step-by-step guide to deploy 20 APIs using Ansible and Helm on different Kubernetes clusters with an OIDC-based login. This guide will include a template designed for Ansible UI (like Ansible Tower or AWX) and focus on end-to-end deployment.
+Here is the updated Jenkinsfile that fixes the LazyMap issue and ensures JSON data is handled properly. This version explicitly converts the LazyMap to a standard Groovy map using .collectEntries() and adds additional error handling.
 
 
 ---
 
-Objective
+Updated Jenkinsfile
 
-1. Login to Kubernetes clusters (IKP) using OIDC.
+pipeline {
+    agent any
+    parameters {
+        string(name: 'API_Name', defaultValue: '', description: 'API Name to fetch details')
+    }
+    stages {
+        stage('Read JSON and Process Data') {
+            steps {
+                script {
+                    // Function to safely parse JSON and convert LazyMap to Groovy Map
+                    def parseJsonFile = { filePath ->
+                        def jsonData = new JsonSlurper().parseText(readFile(filePath))
+                        return jsonData.collectEntries { key, value -> [(key): value] }
+                    }
 
+                    // Read and process Production JSON
+                    def namespaceJson_PROD = parseJsonFile("./cd-production/namespace/prod.json")
+                    if (!namespaceJson_PROD.containsKey(params.API_Name)) {
+                        error "API Name '${params.API_Name}' not found in Production namespace JSON"
+                    }
+                    
+                    env.namespaceProd = namespaceJson_PROD[params.API_Name]?.namespace
+                    env.helmChatNameProd = namespaceJson_PROD[params.API_Name]?.helmChatName
+                    env.helmChatName_reference_PROD = namespaceJson_PROD[params.API_Name]?.helmChatName_reference
 
-2. Deploy APIs using Helm charts.
+                    if (!env.namespaceProd || !env.helmChatNameProd || !env.helmChatName_reference_PROD) {
+                        error "One or more required Production values (namespace, helmChatName, helmChatName_reference) are null"
+                    }
 
+                    echo "Production Details:"
+                    echo "Namespace: ${env.namespaceProd}"
+                    echo "Helm Chat Name: ${env.helmChatNameProd}"
+                    echo "Helm Chat Name Reference: ${env.helmChatName_reference_PROD}"
 
-3. Manage everything using Ansible roles and templates.
+                    // Read and process CONT JSON
+                    def namespaceJson_CONT = parseJsonFile("./cd-production/namespace/cont.json")
+                    if (!namespaceJson_CONT.containsKey(params.API_Name)) {
+                        error "API Name '${params.API_Name}' not found in CONT namespace JSON"
+                    }
+                    
+                    env.namespaceCont = namespaceJson_CONT[params.API_Name]?.namespace
+                    env.helmChatNameCont = namespaceJson_CONT[params.API_Name]?.helmChatName
+                    env.helmChatName_reference_CONT = namespaceJson_CONT[params.API_Name]?.helmChatName_reference
 
+                    if (!env.namespaceCont || !env.helmChatNameCont || !env.helmChatName_reference_CONT) {
+                        error "One or more required CONT values (namespace, helmChatName, helmChatName_reference) are null"
+                    }
 
-
-
----
-
-Step-by-Step Process
-
-1. Set Up a GitHub Repository
-
-1. Create a GitHub repository named ansible-helm-deployment.
-
-
-2. Clone the repository:
-
-git clone https://github.com/yourusername/ansible-helm-deployment.git
-cd ansible-helm-deployment
-
-
-3. Structure your repository:
-
-ansible-helm-deployment/
-├── roles/
-│   ├── cluster_login/
-│   │   ├── tasks/
-│   │   │   ├── main.yml
-│   ├── helm_deploy/
-│   │   ├── tasks/
-│   │   │   ├── main.yml
-├── playbooks/
-│   ├── deploy_with_helm.yml
-├── inventory/
-│   ├── ikp_clusters.yml
-├── group_vars/
-│   ├── all.yml
-├── README.md
-
-
-
-
----
-
-2. Create Ansible Roles
-
-Role: cluster_login
-
-This role handles the Kubernetes OIDC login.
-
-File: roles/cluster_login/tasks/main.yml
-
-- name: Fetch OIDC tokens
-  shell: |
-    set +x;
-    oidc_temp=$(curl -sk -u {{ USER }}:{{ PASSWORD }} -X GET {{ idpapi }}) &&
-    oidc_id_token=$(echo ${oidc_temp} | jq -r '.token.id_token') &&
-    oidc_refresh_token=$(echo ${oidc_temp} | jq -r '.token.refresh_token')
-    echo "${oidc_id_token},${oidc_refresh_token}"
-  register: oidc_tokens
-  args:
-    executable: /bin/bash
-
-- name: Parse OIDC tokens
-  set_fact:
-    oidc_id_token: "{{ oidc_tokens.stdout.split(',')[0] }}"
-    oidc_refresh_token: "{{ oidc_tokens.stdout.split(',')[1] }}"
-
-- name: Decode API certificate
-  shell: |
-    echo "{{ apiCert }}" | base64 -d > /tmp/cert.pem
-  args:
-    executable: /bin/bash
-
-- name: Set Kubernetes cluster
-  shell: |
-    kubectl config --kubeconfig=./kubeconfig set-cluster kubernetes \
-      --server={{ apiserver }} \
-      --certificate-authority=/tmp/cert.pem \
-      --embed-certs=true
-  args:
-    executable: /bin/bash
-
-- name: Set Kubernetes context
-  shell: |
-    kubectl config --kubeconfig=./kubeconfig set-context kubernetes \
-      --cluster=kubernetes \
-      --user={{ USER }}
-  args:
-    executable: /bin/bash
-
-- name: Set Kubernetes user credentials
-  shell: |
-    kubectl config --kubeconfig=./kubeconfig set-credentials {{ USER }} \
-      --auth-provider=oidc \
-      --auth-provider-arg=idp-issuer-url={{ idpissuer }} \
-      --auth-provider-arg=client-id=kubernetes \
-      --auth-provider-arg=id-token={{ oidc_id_token }} \
-      --auth-provider-arg=refresh-token={{ oidc_refresh_token }}
-  args:
-    executable: /bin/bash
-
-- name: Use Kubernetes context
-  shell: |
-    kubectl config --kubeconfig=./kubeconfig use-context kubernetes
-  args:
-    executable: /bin/bash
-
-- name: Verify Kubernetes connection
-  shell: |
-    kubectl --kubeconfig=./kubeconfig version
-  register: kube_connection
-  args:
-    executable: /bin/bash
-
-- name: Output success message
-  debug:
-    msg: "Successfully logged into cluster {{ apiserver }}"
+                    echo "CONT Details:"
+                    echo "Namespace: ${env.namespaceCont}"
+                    echo "Helm Chat Name: ${env.helmChatNameCont}"
+                    echo "Helm Chat Name Reference: ${env.helmChatName_reference_CONT}"
+                }
+            }
+        }
+    }
+}
 
 
 ---
 
-Role: helm_deploy
+Key Fixes & Improvements
 
-This role deploys APIs using Helm.
+1. Fixes LazyMap Issue:
 
-File: roles/helm_deploy/tasks/main.yml
-
-- name: Create Helm chart directory
-  file:
-    path: /tmp/{{ helm_chart_name }}
-    state: directory
-
-- name: Copy Helm chart template
-  copy:
-    src: helm_chart_template/
-    dest: /tmp/{{ helm_chart_name }}/
-
-- name: Update Helm values file
-  template:
-    src: values.yml.j2
-    dest: /tmp/{{ helm_chart_name }}/values.yml
-
-- name: Deploy using Helm
-  shell: |
-    helm upgrade --install {{ release_name }} /tmp/{{ helm_chart_name }} \
-      --namespace {{ namespace }} \
-      --kubeconfig=./kubeconfig
-  args:
-    executable: /bin/bash
-
-
----
-
-3. Inventory File
-
-File: inventory/ikp_clusters.yml
-
-all:
-  children:
-    clusters:
-      hosts:
-        cluster1:
-          USER: "user1"
-          PASSWORD: "password1"
-          idpapi: "https://idp.cluster1.com/token"
-          apiserver: "https://api.cluster1.com"
-          apiCert: "base64_encoded_cert"
-          idpissuer: "https://issuer.cluster1.com"
-          helm_chart_name: "api-helm"
-          release_name: "api-release"
-          namespace: "default"
-        cluster2:
-          USER: "user2"
-          PASSWORD: "password2"
-          idpapi: "https://idp.cluster2.com/token"
-          apiserver: "https://api.cluster2.com"
-          apiCert: "base64_encoded_cert_2"
-          idpissuer: "https://issuer.cluster2.com"
-          helm_chart_name: "api-helm-2"
-          release_name: "api-release-2"
-          namespace: "prod"
-
-
----
-
-4. Helm Values Template
-
-File: roles/helm_deploy/templates/values.yml.j2
-
-apiVersion: v1
-kind: Config
-metadata:
-  name: {{ helm_chart_name }}
-spec:
-  replicas: 2
-  image:
-    repository: my-docker-repo
-    tag: latest
-
-
----
-
-5. Playbook
-
-File: playbooks/deploy_with_helm.yml
-
-- name: Deploy APIs with Helm
-  hosts: clusters
-  roles:
-    - role: cluster_login
-    - role: helm_deploy
-
-
----
-
-6. Global Variables
-
-File: group_vars/all.yml
-
-kubectlCli: "/usr/local/bin/kubectl"
-helmCli: "/usr/local/bin/helm"
-
-
----
-
-7. Running the Playbook
-
-To execute the playbook locally or in Ansible Tower:
-
-ansible-playbook -i inventory/ikp_clusters.yml playbooks/deploy_with_helm.yml
-
-
----
-
-Configuring in Ansible Tower/AWX
-
-1. Templates:
-
-Create a new Job Template in Ansible Tower.
-
-Point it to the playbook deploy_with_helm.yml.
-
-Use the inventory file inventory/ikp_clusters.yml.
+Converts LazyMap to a standard Groovy map using .collectEntries().
 
 
 
-2. Variables:
+2. Reusable Function (parseJsonFile)
 
-Define extra variables for Helm or OIDC tokens dynamically.
+Reads and converts JSON in a clean, reusable way.
 
 
 
-3. Run the Job:
+3. Null & Key Checks:
 
-Execute the job template for all clusters.
+Prevents errors if a key is missing or a value is null.
+
+
+
+4. Better Debugging:
+
+Provides meaningful error messages if API_Name is not found.
 
 
 
 
-
----
-
-Let me know if you want additional clarification or further help!
+Let me know if you need further modifications!
