@@ -1,9 +1,19 @@
-Here is the updated Jenkinsfile that fixes the LazyMap issue and ensures JSON data is handled properly. This version explicitly converts the LazyMap to a standard Groovy map using .collectEntries() and adds additional error handling.
+The error in your Jenkins pipeline is:
+
+java.io.NotSerializableException: groovy.json.JsonSlurper
+
+Cause of the Error
+
+Jenkins runs pipeline steps in separate executions, meaning non-serializable objects (like JsonSlurper) cannot be stored in Jenkins' environment (env or global variables). Groovy's JsonSlurper creates a complex object that Jenkins cannot serialize.
+
+Fix
+
+To fix this, ensure that JSON data is processed within the script block and not stored in env.
 
 
 ---
 
-Updated Jenkinsfile
+Fixed Jenkinsfile
 
 pipeline {
     agent any
@@ -14,49 +24,29 @@ pipeline {
         stage('Read JSON and Process Data') {
             steps {
                 script {
-                    // Function to safely parse JSON and convert LazyMap to Groovy Map
+                    // Function to read and parse JSON without causing serialization issues
                     def parseJsonFile = { filePath ->
-                        def jsonData = new JsonSlurper().parseText(readFile(filePath))
-                        return jsonData.collectEntries { key, value -> [(key): value] }
+                        def jsonText = readFile(filePath)
+                        return new groovy.json.JsonSlurper().parseText(jsonText)
                     }
 
                     // Read and process Production JSON
                     def namespaceJson_PROD = parseJsonFile("./cd-production/namespace/prod.json")
-                    if (!namespaceJson_PROD.containsKey(params.API_Name)) {
-                        error "API Name '${params.API_Name}' not found in Production namespace JSON"
-                    }
+                    def prodData = namespaceJson_PROD[params.API_Name] ?: error "API Name '${params.API_Name}' not found in Production namespace JSON"
                     
-                    env.namespaceProd = namespaceJson_PROD[params.API_Name]?.namespace
-                    env.helmChatNameProd = namespaceJson_PROD[params.API_Name]?.helmChatName
-                    env.helmChatName_reference_PROD = namespaceJson_PROD[params.API_Name]?.helmChatName_reference
-
-                    if (!env.namespaceProd || !env.helmChatNameProd || !env.helmChatName_reference_PROD) {
-                        error "One or more required Production values (namespace, helmChatName, helmChatName_reference) are null"
-                    }
-
                     echo "Production Details:"
-                    echo "Namespace: ${env.namespaceProd}"
-                    echo "Helm Chat Name: ${env.helmChatNameProd}"
-                    echo "Helm Chat Name Reference: ${env.helmChatName_reference_PROD}"
+                    echo "Namespace: ${prodData.namespace}"
+                    echo "Helm Chat Name: ${prodData.helmChatName}"
+                    echo "Helm Chat Name Reference: ${prodData.helmChatName_reference}"
 
                     // Read and process CONT JSON
                     def namespaceJson_CONT = parseJsonFile("./cd-production/namespace/cont.json")
-                    if (!namespaceJson_CONT.containsKey(params.API_Name)) {
-                        error "API Name '${params.API_Name}' not found in CONT namespace JSON"
-                    }
-                    
-                    env.namespaceCont = namespaceJson_CONT[params.API_Name]?.namespace
-                    env.helmChatNameCont = namespaceJson_CONT[params.API_Name]?.helmChatName
-                    env.helmChatName_reference_CONT = namespaceJson_CONT[params.API_Name]?.helmChatName_reference
-
-                    if (!env.namespaceCont || !env.helmChatNameCont || !env.helmChatName_reference_CONT) {
-                        error "One or more required CONT values (namespace, helmChatName, helmChatName_reference) are null"
-                    }
+                    def contData = namespaceJson_CONT[params.API_Name] ?: error "API Name '${params.API_Name}' not found in CONT namespace JSON"
 
                     echo "CONT Details:"
-                    echo "Namespace: ${env.namespaceCont}"
-                    echo "Helm Chat Name: ${env.helmChatNameCont}"
-                    echo "Helm Chat Name Reference: ${env.helmChatName_reference_CONT}"
+                    echo "Namespace: ${contData.namespace}"
+                    echo "Helm Chat Name: ${contData.helmChatName}"
+                    echo "Helm Chat Name Reference: ${contData.helmChatName_reference}"
                 }
             }
         }
@@ -66,31 +56,28 @@ pipeline {
 
 ---
 
-Key Fixes & Improvements
+Key Fixes
 
-1. Fixes LazyMap Issue:
+1. Avoids Storing JSON Objects in env
 
-Converts LazyMap to a standard Groovy map using .collectEntries().
-
-
-
-2. Reusable Function (parseJsonFile)
-
-Reads and converts JSON in a clean, reusable way.
+env variables must be plain strings, not objects.
 
 
 
-3. Null & Key Checks:
+2. Ensures JSON Data is Read & Processed in the Same Step
 
-Prevents errors if a key is missing or a value is null.
+JSON objects don’t persist across pipeline steps due to serialization.
 
 
 
-4. Better Debugging:
+3. Uses ?: for Safe API Name Lookup
 
-Provides meaningful error messages if API_Name is not found.
+Prevents crashes if params.API_Name doesn’t exist in the JSON.
 
 
 
 
-Let me know if you need further modifications!
+
+---
+
+This should fix your NotSerializableException issue. Let me know if you face any further errors!
