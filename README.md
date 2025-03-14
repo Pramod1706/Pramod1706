@@ -1,28 +1,33 @@
-filebeat.inputs:
-  - type: log
-    enabled: true
-    paths:
-      - "/appvol/logs/ikp/uat/*.log"
-      - "/appvol/logs/ikp/oat/*.log"
-      - "/appvol/logs/ikp/adt/*.log"
-    multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
-    multiline.negate: true
-    multiline.match: after
-    scan_frequency: 10s         # Reduce CPU usage
-    close_inactive: 5m          # Free memory by closing inactive logs
-    ignore_older: 2d            # Ignore logs older than 2 days (indirectly skips last 1 day)
-    clean_removed: true         # Prevent Filebeat from tracking deleted logs
+-Xms2500m
+-Xmx2500m
+-XX:+UseG1GC
+-XX:InitiatingHeapOccupancyPercent=50
+-XX:+AlwaysPreTouch
+-XX:+HeapDumpOnOutOfMemoryError
+-Djava.awt.headless=true
+-Dfile.encoding=UTF-8
+-Djruby.compile.invokedynamic=true
+-Djruby.jit.threshold=0
+-Djava.security.egd=file:/dev/urandom
 
-output.logstash:
-  hosts: ["logstash.gra-elk-snbx5.svc.cluster.local:5044"]
-  bulk_max_size: 5000           # Optimize bulk processing
-  worker: 2                     # Improve parallel processing
-  timeout: 30s                  # Prevent timeouts for large logs
-
-queue.mem:
-  events: 8192                  # Controls memory buffer size
-  flush.min_events: 512         # Flush data frequently to avoid memory overflow
-  flush.timeout: 5s             # Reduce log delay
-
-logging.level: info
-logging.to_stderr: true
+# AppDynamics settings remain the same
+-javaagent:/opt/appdynamics/java-oracle-agent/javaagent.jar
+-Dappdynamics.install.dir=/opt/appdynamics/java-oracle-agent/
+-Dappdynamics.opentelemetry.enabled=false
+-Dappdynamics.agent.runtime.dir=/home/javadm/java-oracle-agent
+-Dappdynamics.agent.logs.dir=/home/javadm/java-oracle-agent/logs
+-Dappdynamics.agent.conf.dir=/home/javadm/java-oracle-agent/conf
+-Dappdynamics.controller.ssl.enabled=true
+-Dappdynamics.force.default.ssl.certificate.validation=false
+-Dappdynamics.agent.applicationName=WREN-ELK-UAT
+-Dappdynamics.agent.tierName=logstash
+-Dappdynamics.agent.uniqueHostId=logstash-uat
+-Dappdynamics.agent.nodeName=logstash-uat
+-Dappdynamics.controller.hostName=gratest.saas.appdynamics.com
+-Dappdynamics.controller.port=443
+-Dappdynamics.agent.accountName=gratest
+-Dappdynamics.agent.accountAccessKey=i04zdo61nahs
+-Dappdynamics.http.proxyPort=37071
+-Dappdynamics.http.proxyHost=app-dynamics-proxy.hk.hsbc
+-Dappdynamics.https.proxyPort=37071
+-Dappdynamics.https.proxyHost=app-dynamics-proxy.hk.hsbc
