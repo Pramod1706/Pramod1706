@@ -1,83 +1,225 @@
-The error in your Jenkins pipeline is:
-
-java.io.NotSerializableException: groovy.json.JsonSlurper
-
-Cause of the Error
-
-Jenkins runs pipeline steps in separate executions, meaning non-serializable objects (like JsonSlurper) cannot be stored in Jenkins' environment (env or global variables). Groovy's JsonSlurper creates a complex object that Jenkins cannot serialize.
-
-Fix
-
-To fix this, ensure that JSON data is processed within the script block and not stored in env.
+Thanks for the detailed follow-up — based on the Memory Analyzer Tool (MAT) heap dump and your system behavior (500 errors and OOM in backend APIs), let me now explain the full picture from scratch in simple terms and connect it with your production symptoms.
 
 
 ---
 
-Fixed Jenkinsfile
+🧠 What the MAT Heap Dump Tells Us (Freshly Explained)
 
-pipeline {
-    agent any
-    parameters {
-        string(name: 'API_Name', defaultValue: '', description: 'API Name to fetch details')
-    }
-    stages {
-        stage('Read JSON and Process Data') {
-            steps {
-                script {
-                    // Function to read and parse JSON without causing serialization issues
-                    def parseJsonFile = { filePath ->
-                        def jsonText = readFile(filePath)
-                        return new groovy.json.JsonSlurper().parseText(jsonText)
-                    }
+✅ Heap Size and Usage
 
-                    // Read and process Production JSON
-                    def namespaceJson_PROD = parseJsonFile("./cd-production/namespace/prod.json")
-                    def prodData = namespaceJson_PROD[params.API_Name] ?: error "API Name '${params.API_Name}' not found in Production namespace JSON"
-                    
-                    echo "Production Details:"
-                    echo "Namespace: ${prodData.namespace}"
-                    echo "Helm Chat Name: ${prodData.helmChatName}"
-                    echo "Helm Chat Name Reference: ${prodData.helmChatName_reference}"
+Heap retained: 4.11 GB
 
-                    // Read and process CONT JSON
-                    def namespaceJson_CONT = parseJsonFile("./cd-production/namespace/cont.json")
-                    def contData = namespaceJson_CONT[params.API_Name] ?: error "API Name '${params.API_Name}' not found in CONT namespace JSON"
+One massive object: java.lang.Object[] holding 97.4% of the heap!
 
-                    echo "CONT Details:"
-                    echo "Namespace: ${contData.namespace}"
-                    echo "Helm Chat Name: ${contData.helmChatName}"
-                    echo "Helm Chat Name Reference: ${contData.helmChatName_reference}"
-                }
-            }
-        }
-    }
+That object is tied to a thread running JDBC code in PostgreSQL driver (QueryExecutorImpl.processResults)
+
+
+This means:
+
+> 🔥 A single JDBC call has loaded almost all heap into memory via a very large result set.
+
+
+
+
+---
+
+🔎 Who Is Holding the Memory?
+
+Thread Identified:
+
+http-nio-8080-exec-8 (Tomcat worker thread handling an HTTP request)
+
+Internally executing: org.postgresql.core.v3.QueryExecutorImpl.processResults()
+This is the PostgreSQL JDBC driver processing a huge query response.
+
+
+
+---
+
+⚠️ Why This Happens (Root Cause)
+
+This is not a normal JDBC call. You're likely:
+
+Executing a large query (SELECT * FROM big_table or a massive join)
+
+Not streaming results — so the whole result is loaded into Java heap
+
+Possibly not closing JDBC resources properly
+
+
+PostgreSQL JDBC loads everything unless you explicitly ask it to stream.
+
+
+---
+
+🔁 Why You’re Seeing 500 Errors Elsewhere
+
+🔗 Connection Blockage → API Errors
+
+If one request is:
+
+Holding a 4+ GB result set
+
+And the thread is stuck processing it…
+
+
+Then:
+
+That thread can’t serve new requests
+
+DB connections get exhausted (Hikari pool is blocked)
+
+Other backend API requests fail with 500, even if they’re unrelated!
+
+
+It’s a domino effect due to bad DB resource usage in one query.
+
+
+---
+
+🎯 Real Root Problems in Your Backend
+
+Symptom	Actual Root Cause	Evidence
+
+OOM (Out of Memory)	Huge JDBC result in heap	Object[] 97.4% of heap
+500 errors	Thread + DB connection blocked	JDBC thread never finishes
+Hikari pool stall	Connections not returned	Possible leak or long execution
+Backend slowdown	GC and memory pressure	4+ GB used by one object
+
+
+
+---
+
+✅ Step-by-Step Fix Strategy
+
+🔧 1. Fix Your JDBC Querying
+
+Update your code like this (Java style):
+
+Connection conn = dataSource.getConnection();
+conn.setAutoCommit(false); // Required for PostgreSQL streaming
+
+PreparedStatement stmt = conn.prepareStatement(
+  "SELECT id, name FROM big_table", 
+  ResultSet.TYPE_FORWARD_ONLY, 
+  ResultSet.CONCUR_READ_ONLY
+);
+stmt.setFetchSize(50); // Stream data in chunks
+
+ResultSet rs = stmt.executeQuery();
+while (rs.next()) {
+    // Process row
 }
+rs.close();
+stmt.close();
+conn.close();
 
-
----
-
-Key Fixes
-
-1. Avoids Storing JSON Objects in env
-
-env variables must be plain strings, not objects.
-
-
-
-2. Ensures JSON Data is Read & Processed in the Same Step
-
-JSON objects don’t persist across pipeline steps due to serialization.
-
-
-
-3. Uses ?: for Safe API Name Lookup
-
-Prevents crashes if params.API_Name doesn’t exist in the JSON.
-
+> ⚠️ Don’t forget conn.setAutoCommit(false) — PostgreSQL needs this for streaming.
 
 
 
 
 ---
 
-This should fix your NotSerializableException issue. Let me know if you face any further errors!
+⚠️ 2. Enable Hikari Leak Detection
+
+Add this in application.properties:
+
+spring.datasource.hikari.leak-detection-threshold=2000
+
+This will show logs if a connection is held longer than 2 seconds.
+
+
+---
+
+🔍 3. Trace the Controller or Endpoint
+
+Use thread dump or profiling to trace:
+
+What controller/REST endpoint is triggering that huge query?
+
+Does it use pagination or filtering?
+
+
+Check if the offending call is serializing large datasets to JSON, which adds memory load.
+
+
+---
+
+💾 4. Avoid Large JSON Responses
+
+Returning entire tables as JSON will:
+
+Bloat memory
+
+Cause slow GC
+
+Impact heap usage and CPU
+
+
+Instead:
+
+Paginate the results (limit/offset or cursor)
+
+Stream in chunks using Spring WebFlux or StreamingResponseBody
+
+
+
+---
+
+🚀 5. Temporary Mitigation
+
+Until you fix the code:
+
+Increase heap from 6 GB → 8 GB
+
+Increase Hikari maximumPoolSize
+
+Scale up backend pods (CPU & memory)
+
+Add rate limit for that specific API
+
+
+
+---
+
+🧵 Your Backend Has This Lifecycle Problem:
+
+JDBC Query → Fetches Huge Result → Retained in Heap → GC Struggles
+→ Tomcat Thread Held → Connection Not Returned → Hikari Starved
+→ Other APIs Wait → 500 Errors Everywhere
+
+
+---
+
+✅ What You Should Do Today
+
+1. Identify the API and SQL query tied to that http-nio-8080-exec-8 thread.
+
+
+2. Apply streaming JDBC logic (with fetchSize and autoCommit(false)).
+
+
+3. Enable leak detection and capture thread dump if needed.
+
+
+4. Check GC logs — you’ll likely see long GC pauses.
+
+
+5. Avoid returning 1000s of records as JSON without pagination.
+
+
+
+
+---
+
+Let me know:
+
+If you want me to review the actual controller or SQL query
+
+If you’re using Spring JDBC, Hibernate, JPA, or raw JDBC
+
+And if this happens under normal load or only during JMeter testing
+
+
+I'll tailor the exact fix/code.
